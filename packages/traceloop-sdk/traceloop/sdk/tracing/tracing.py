@@ -40,7 +40,7 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
 )
 
 
-TRACER_NAME = "traceloop.tracer"
+TRACER_NAME = "fortifyroot.tracer"
 EXCLUDED_URLS = """
     iam.cloud.ibm.com,
     dataplatform.cloud.ibm.com,
@@ -51,6 +51,7 @@ EXCLUDED_URLS = """
     api.cohere.ai,
     pinecone.io,
     traceloop.com,
+    fortifyroot.com,
     posthog.com,
     sentry.io,
     bedrock-runtime,
@@ -207,7 +208,7 @@ class TracerWrapper(object):
 
         print(
             Fore.RED
-            + "Warning: Traceloop not initialized, make sure you call Traceloop.init()"
+            + "Warning: FortifyRoot not initialized, make sure you call fortifyroot.init()"
         )
         print(Fore.RESET)
         return False
@@ -580,8 +581,8 @@ def init_instrumentations(
             print(Fore.RED + f"Warning: {instrument} instrumentation does not exist.")
             print(
                 "Usage:\n"
-                "from traceloop.sdk.instruments import Instruments\n"
-                "Traceloop.init(app_name='...', instruments=set([Instruments.OPENAI]))"
+                "from fortifyroot.instruments import Instruments\n"
+                "FortifyRoot.init(app_name='...', instruments=set([Instruments.OPENAI]))"
             )
             print(Fore.RESET)
 
