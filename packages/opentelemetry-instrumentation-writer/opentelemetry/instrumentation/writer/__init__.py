@@ -1,5 +1,6 @@
 """OpenTelemetry Writer instrumentation"""
 
+import asyncio  # FR: async safety
 import logging
 import os
 import time
@@ -31,6 +32,10 @@ from opentelemetry.instrumentation.writer.safety import (
 from opentelemetry.instrumentation.writer.span_utils import (
     set_input_attributes, set_model_input_attributes,
     set_model_response_attributes, set_response_attributes)
+from opentelemetry.instrumentation.writer.streaming_runtime import (
+    create_async_stream_processor_delegate as _fr_create_async_stream_processor,
+    create_stream_processor_delegate as _fr_create_stream_processor,
+)
 from opentelemetry.instrumentation.writer.utils import (
     enhance_list_size, error_metrics_attributes,
     initialize_accumulated_response, initialize_choice, initialize_tool_call,
@@ -283,6 +288,10 @@ async def _create_async_stream_processor(
         span.end()
 
 
+_create_stream_processor = _fr_create_stream_processor
+_create_async_stream_processor = _fr_create_async_stream_processor
+
+
 def _handle_input(span, kwargs, event_logger):
     set_model_input_attributes(span, kwargs)
     if should_emit_events() and event_logger:
@@ -468,7 +477,7 @@ async def _awrap(
         },
     )
 
-    kwargs = _apply_prompt_safety(span, kwargs, request_type, name)
+    kwargs = await asyncio.to_thread(_apply_prompt_safety, span, kwargs, request_type, name)  # FR: async safety
     _handle_input(span, kwargs, event_logger)
 
     start_time = time.time()
@@ -521,7 +530,8 @@ async def _awrap(
                     attributes=response_attributes(response, to_wrap.get("method")),
                 )
 
-            _apply_completion_safety(
+            await asyncio.to_thread(  # FR: async safety
+                _apply_completion_safety,
                 span, response, request_type, name
             )
             _handle_response(

@@ -1,4 +1,4 @@
-name: Safety PR Tests
+name: FR PR Tests
 
 on:
   pull_request:
@@ -7,14 +7,18 @@ permissions:
   contents: read
 
 concurrency:
-  group: safety-pr-${{ github.event.pull_request.number || github.ref }}
+  group: fr-pr-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  safety-tests:
-    name: Safety Tests
+  fr-tests:
+    name: FR Tests (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
 
     steps:
       - name: Check out code
@@ -23,24 +27,23 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
 
-      - name: Set up Python 3.11
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
           cache: "pip"
+          cache-dependency-path: |
+            packages/**/pyproject.toml
 
-      - name: Install Poetry
-        run: python -m pip install --upgrade pip poetry
-
-      - name: Run safety test suite
+      - name: Run FR-marked test suite
         env:
           HAYSTACK_TELEMETRY_ENABLED: "False"
-        run: bash ./scripts/run-tests.sh --safety
+        run: bash ./scripts/run-tests.sh --fr
 
-      - name: Upload safety test reports
+      - name: Upload FR test reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: safety-test-reports
+          name: fr-test-reports-py${{ matrix.python-version }}
           path: reports/test-run/
           if-no-files-found: ignore

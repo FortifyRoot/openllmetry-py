@@ -17,6 +17,9 @@ from opentelemetry.instrumentation.replicate.safety import (
     _apply_completion_safety,
     _apply_prompt_safety,
 )
+from opentelemetry.instrumentation.replicate.streaming_runtime import (
+    build_streaming_response_delegate as _fr_build_streaming_response,
+)
 from opentelemetry.instrumentation.replicate.span_utils import (
     set_input_attributes,
     set_model_input_attributes,
@@ -61,19 +64,7 @@ WRAPPED_METHODS = [
 
 def is_streaming_response(response):
     return isinstance(response, types.GeneratorType)
-
-
-def _build_from_streaming_response(span, event_logger, response):
-    complete_response = ""
-    for item in response:
-        item_to_yield = item
-        complete_response += str(item)
-
-        yield item_to_yield
-
-    _handle_response(span, event_logger, complete_response)
-
-    span.end()
+_build_from_streaming_response = _fr_build_streaming_response
 
 
 @dont_throw

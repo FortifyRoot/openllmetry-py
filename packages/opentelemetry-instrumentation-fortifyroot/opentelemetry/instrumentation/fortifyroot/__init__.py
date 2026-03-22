@@ -1,4 +1,5 @@
 from opentelemetry.instrumentation.fortifyroot.safety import (
+    HANDLER_LOCK,
     SAFETY_EVENT_NAME,
     SafetyContext,
     SafetyDecision,
@@ -13,25 +14,52 @@ from opentelemetry.instrumentation.fortifyroot.safety import (
     register_completion_safety_handler,
     register_prompt_safety_handler,
     run_completion_safety,
+    run_completion_safety_async,
     run_prompt_safety,
+    run_prompt_safety_async,
     set_object_value,
+)
+from opentelemetry.instrumentation.fortifyroot.text_streaming import (
+    CompletionTextStreamGroup,
+)
+from opentelemetry.instrumentation.fortifyroot.streaming import (
+    BoundCompletionSafetyStream,
+    CompletionSafetyStreamFactory,
+    CompletionSafetyStreamSession,
+    SafetyStreamContext,
+    clear_completion_safety_stream_factory,
+    create_completion_safety_stream,
+    get_completion_safety_stream_factory,
+    register_completion_safety_stream_factory,
 )
 
 __all__ = [
     "SAFETY_EVENT_NAME",
+    "HANDLER_LOCK",
     "SafetyContext",
     "SafetyDecision",
     "SafetyFinding",
     "SafetyLocation",
     "SafetyResult",
     "clear_safety_handlers",
+    "clear_completion_safety_stream_factory",
     "clone_value",
+    "CompletionSafetyStreamFactory",
+    "CompletionSafetyStreamSession",
+    "BoundCompletionSafetyStream",
+    "CompletionTextStreamGroup",
+    "create_completion_safety_stream",
     "get_completion_safety_handler",
+    "get_completion_safety_stream_factory",
     "get_object_value",
     "get_prompt_safety_handler",
     "register_completion_safety_handler",
+    "register_completion_safety_stream_factory",
     "register_prompt_safety_handler",
     "run_completion_safety",
+    "run_completion_safety_async",
     "run_prompt_safety",
+    "run_prompt_safety_async",
+    "SafetyStreamContext",
     "set_object_value",
 ]

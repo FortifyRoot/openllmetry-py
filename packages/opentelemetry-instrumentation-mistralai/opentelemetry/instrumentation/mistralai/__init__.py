@@ -1,5 +1,6 @@
 """OpenTelemetry Mistral AI instrumentation"""
 
+import asyncio  # FR: async safety
 import json
 import logging
 from typing import Collection, Union
@@ -16,6 +17,9 @@ from opentelemetry.instrumentation.mistralai.event_models import (
 from opentelemetry.instrumentation.mistralai.safety import (
     _apply_completion_safety,
     _apply_prompt_safety,
+)
+from opentelemetry.instrumentation.mistralai.streaming_safety import (
+    MistralAIStreamingSafety,
 )
 from opentelemetry.instrumentation.mistralai.utils import (
     dont_throw,
@@ -211,7 +215,9 @@ def _accumulate_streaming_response(span, event_logger, llm_request_type, respons
         usage=UsageInfo(prompt_tokens=0, total_tokens=0, completion_tokens=0),
     )
 
+    streaming_safety = MistralAIStreamingSafety(span, "mistralai.chat")
     for res in response:
+        res = streaming_safety.process_chunk(res)
         yield res
 
         # Handle new CompletionEvent structure with .data attribute
@@ -255,7 +261,9 @@ async def _aaccumulate_streaming_response(
         usage=UsageInfo(prompt_tokens=0, total_tokens=0, completion_tokens=0),
     )
 
+    streaming_safety = MistralAIStreamingSafety(span, "mistralai.chat")
     async for res in response:
+        res = streaming_safety.process_chunk(res)
         yield res
 
         # Handle new CompletionEvent structure with .data attribute
@@ -464,7 +472,7 @@ async def _awrap(
         },
     )
 
-    kwargs = _apply_prompt_safety(span, kwargs, llm_request_type, name)
+    kwargs = await asyncio.to_thread(_apply_prompt_safety, span, kwargs, llm_request_type, name)  # FR: async safety
     _handle_input(span, event_logger, args, kwargs, to_wrap)
 
     if to_wrap.get("streaming"):
@@ -478,7 +486,7 @@ async def _awrap(
                 span, event_logger, llm_request_type, response
             )
 
-        _apply_completion_safety(span, response, llm_request_type, name)
+        await asyncio.to_thread(_apply_completion_safety, span, response, llm_request_type, name)  # FR: async safety
         _handle_response(span, event_logger, llm_request_type, response)
 
         if span.is_recording():

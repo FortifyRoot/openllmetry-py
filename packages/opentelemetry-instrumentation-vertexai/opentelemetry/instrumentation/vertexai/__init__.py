@@ -1,5 +1,6 @@
 """OpenTelemetry Vertex AI instrumentation"""
 
+import asyncio  # FR: async safety
 import logging
 import types
 from typing import Collection
@@ -23,6 +24,10 @@ from opentelemetry.instrumentation.vertexai.span_utils import (
 from opentelemetry.instrumentation.vertexai.safety import (
     _apply_completion_safety,
     _apply_prompt_safety,
+)
+from opentelemetry.instrumentation.vertexai.streaming_runtime import (
+    build_async_streaming_response_delegate as _fr_build_async_streaming_response,
+    build_streaming_response_delegate as _fr_build_streaming_response,
 )
 from opentelemetry.instrumentation.vertexai.utils import dont_throw, should_emit_events
 from opentelemetry.instrumentation.vertexai.version import __version__
@@ -149,40 +154,8 @@ def handle_streaming_response(span, event_logger, llm_model, response, token_usa
         span.set_status(Status(StatusCode.OK))
 
 
-def _build_from_streaming_response(span, event_logger, response, llm_model):
-    complete_response = ""
-    token_usage = None
-    for item in response:
-        item_to_yield = item
-        complete_response += str(item.text)
-        if item.usage_metadata:
-            token_usage = item.usage_metadata
-
-        yield item_to_yield
-
-    handle_streaming_response(
-        span, event_logger, llm_model, complete_response, token_usage
-    )
-
-    span.set_status(Status(StatusCode.OK))
-    span.end()
-
-
-async def _abuild_from_streaming_response(span, event_logger, response, llm_model):
-    complete_response = ""
-    token_usage = None
-    async for item in response:
-        item_to_yield = item
-        complete_response += str(item.text)
-        if item.usage_metadata:
-            token_usage = item.usage_metadata
-
-        yield item_to_yield
-
-    handle_streaming_response(span, event_logger, llm_model, response, token_usage)
-
-    span.set_status(Status(StatusCode.OK))
-    span.end()
+_build_from_streaming_response = _fr_build_streaming_response
+_abuild_from_streaming_response = _fr_build_async_streaming_response
 
 
 @dont_throw
@@ -247,7 +220,7 @@ async def _awrap(tracer, event_logger, to_wrap, wrapped, instance, args, kwargs)
         },
     )
 
-    args, kwargs = _apply_prompt_safety(span, args, kwargs, name)
+    args, kwargs = await asyncio.to_thread(_apply_prompt_safety, span, args, kwargs, name)  # FR: async safety
     await _handle_request(span, event_logger, args, kwargs, llm_model)
 
     response = await wrapped(*args, **kwargs)
@@ -262,7 +235,7 @@ async def _awrap(tracer, event_logger, to_wrap, wrapped, instance, args, kwargs)
                 span, event_logger, response, llm_model
             )
         else:
-            _apply_completion_safety(span, response, name)
+            await asyncio.to_thread(_apply_completion_safety, span, response, name)  # FR: async safety
             _handle_response(span, event_logger, response, llm_model)
 
     span.end()

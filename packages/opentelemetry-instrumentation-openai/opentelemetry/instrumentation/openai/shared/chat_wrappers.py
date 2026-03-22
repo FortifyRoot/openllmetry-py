@@ -1,3 +1,4 @@
+import asyncio  # FR: async safety
 import copy
 import json
 import logging
@@ -34,6 +35,9 @@ from opentelemetry.instrumentation.openai.shared.event_models import (
 from opentelemetry.instrumentation.openai.shared.chat_safety import (
     _apply_completion_safety,
     _apply_prompt_safety,
+)
+from opentelemetry.instrumentation.openai.shared.streaming_safety import (
+    OpenAIChatStreamingSafety,
 )
 from opentelemetry.instrumentation.openai.utils import (
     _with_chat_telemetry_wrapper,
@@ -196,7 +200,7 @@ async def achat_wrapper(
 
     # Use the span as current context to ensure events get proper trace context
     with trace.use_span(span, end_on_exit=False):
-        kwargs = _apply_prompt_safety(span, kwargs)
+        kwargs = await asyncio.to_thread(_apply_prompt_safety, span, kwargs)  # FR: async safety
         await _handle_request(span, kwargs, instance)
 
         try:
@@ -256,7 +260,7 @@ async def achat_wrapper(
 
         duration = end_time - start_time
 
-        _apply_completion_safety(span, response)
+        await asyncio.to_thread(_apply_completion_safety, span, response)  # FR: async safety
         _handle_response(
             response,
             span,
@@ -646,6 +650,7 @@ class ChatStream(ObjectProxy):
         # will be updated when first token is received
         self._time_of_first_token = self._start_time
         self._complete_response = {"choices": [], "model": ""}
+        self._streaming_safety = OpenAIChatStreamingSafety(span, SPAN_NAME)
 
         # Cleanup state tracking to prevent duplicate operations
         self._cleanup_completed = False
@@ -732,6 +737,7 @@ class ChatStream(ObjectProxy):
             )
             self._first_token = False
 
+        item = self._streaming_safety.process_chunk(item)
         _accumulate_stream_items(item, self._complete_response)
 
     def _shared_attributes(self):
@@ -878,6 +884,7 @@ def _build_from_streaming_response(
     request_kwargs=None,
 ):
     complete_response = {"choices": [], "model": "", "id": ""}
+    streaming_safety = OpenAIChatStreamingSafety(span, SPAN_NAME)
 
     first_token = True
     time_of_first_token = start_time  # will be updated when first token is received
@@ -885,7 +892,7 @@ def _build_from_streaming_response(
     for item in response:
         span.add_event(name=f"{SpanAttributes.LLM_CONTENT_COMPLETION_CHUNK}")
 
-        item_to_yield = item
+        item_to_yield = streaming_safety.process_chunk(item)
 
         if first_token and streaming_time_to_first_token:
             time_of_first_token = time.time()
@@ -949,6 +956,7 @@ async def _abuild_from_streaming_response(
     request_kwargs=None,
 ):
     complete_response = {"choices": [], "model": "", "id": ""}
+    streaming_safety = OpenAIChatStreamingSafety(span, SPAN_NAME)
 
     first_token = True
     time_of_first_token = start_time  # will be updated when first token is received
@@ -956,7 +964,7 @@ async def _abuild_from_streaming_response(
     async for item in response:
         span.add_event(name=f"{SpanAttributes.LLM_CONTENT_COMPLETION_CHUNK}")
 
-        item_to_yield = item
+        item_to_yield = streaming_safety.process_chunk(item)
 
         if first_token and streaming_time_to_first_token:
             time_of_first_token = time.time()

@@ -1,3 +1,4 @@
+import asyncio  # FR: async safety
 import json
 import pydantic
 import re
@@ -29,6 +30,11 @@ from opentelemetry.instrumentation.openai.utils import (
     _with_tracer_wrapper,
     dont_throw,
     should_send_prompts,
+)
+from opentelemetry.instrumentation.openai.v1.responses_safety import (  # FR: safety imports
+    ResponsesStreamingSafety,  # FR: streaming chunk-level masking
+    apply_response_prompt_safety,  # FR: prompt safety before API call
+    apply_response_completion_safety,  # FR: completion safety after API call
 )
 
 
@@ -195,6 +201,17 @@ def parse_response(response: Union[LegacyAPIResponse, Response]) -> Response:
     return response
 
 
+def _cache_legacy_parsed_response(response, parsed_response) -> None:  # FR: helper for tests
+    """Cache a parsed response on the legacy response object so re-parse returns it."""
+    if not isinstance(response, LegacyAPIResponse):
+        return
+    parsed_cache = getattr(response, "_parsed_by_type", None)
+    if not isinstance(parsed_cache, dict):
+        return
+    cache_key = getattr(response, "_cast_to", type(parsed_response))
+    parsed_cache[cache_key] = parsed_response
+
+
 def get_tools_from_kwargs(kwargs: dict) -> list[ToolParam]:
     tools_input = kwargs.get("tools", [])
     # Handle case where tools key exists but value is None
@@ -289,21 +306,16 @@ def set_data_attributes(traced_response: TracedData, span: Span):
             reasoning_tokens or 0,
         )
 
-    _set_span_attribute(
-        span,
-        f"{SpanAttributes.LLM_REQUEST_REASONING_SUMMARY}",
-        traced_response.request_reasoning_summary or (),
-    )
-    _set_span_attribute(
-        span,
-        f"{SpanAttributes.LLM_REQUEST_REASONING_EFFORT}",
-        traced_response.request_reasoning_effort or (),
-    )
-    _set_span_attribute(
-        span,
-        f"{SpanAttributes.LLM_RESPONSE_REASONING_EFFORT}",
-        traced_response.response_reasoning_effort or (),
-    )
+    # FR: defensive getattr - these attributes may not exist in older semconv versions
+    _reasoning_summary_attr = getattr(SpanAttributes, "LLM_REQUEST_REASONING_SUMMARY", None)  # FR
+    _reasoning_effort_attr = getattr(SpanAttributes, "LLM_REQUEST_REASONING_EFFORT", None)  # FR
+    _response_reasoning_attr = getattr(SpanAttributes, "LLM_RESPONSE_REASONING_EFFORT", None)  # FR
+    if _reasoning_summary_attr:  # FR
+        _set_span_attribute(span, _reasoning_summary_attr, traced_response.request_reasoning_summary or ())  # FR
+    if _reasoning_effort_attr:  # FR
+        _set_span_attribute(span, _reasoning_effort_attr, traced_response.request_reasoning_effort or ())  # FR
+    if _response_reasoning_attr:  # FR
+        _set_span_attribute(span, _response_reasoning_attr, traced_response.response_reasoning_effort or ())  # FR
 
     if should_send_prompts():
         prompt_index = 0
@@ -502,21 +514,30 @@ def responses_get_or_create_wrapper(tracer: Tracer, wrapped, instance, args, kwa
     # Remove OpenAI sentinel values (NOT_GIVEN, Omit) to allow chained .get() calls
     non_sentinel_kwargs = _sanitize_sentinel_values(kwargs)
 
+    # FR: create span early so prompt safety can attach events to it
+    ctx = context_api.get_current()  # FR: moved before wrapped() for prompt safety
+    span = tracer.start_span(  # FR: moved before wrapped() for prompt safety
+        SPAN_NAME,
+        kind=SpanKind.CLIENT,
+        start_time=start_time,
+        context=ctx,
+    )
+    _set_request_attributes(span, prepare_kwargs_for_shared_attributes(non_sentinel_kwargs), instance)  # FR: moved
+    try:  # FR: prompt safety
+        non_sentinel_kwargs = apply_response_prompt_safety(span, non_sentinel_kwargs)  # FR: prompt safety
+    except Exception:  # FR: prompt safety
+        pass  # FR: prompt safety
+
+    # FR: merge safety-modified keys back into original kwargs (preserving sentinels)
+    for key in ("input", "instructions"):  # FR: prompt safety
+        if key in non_sentinel_kwargs:  # FR: prompt safety
+            kwargs[key] = non_sentinel_kwargs[key]  # FR: prompt safety
+
     try:
         response = wrapped(*args, **kwargs)
         if isinstance(response, Stream):
-            # Capture current trace context to maintain trace continuity
-            ctx = context_api.get_current()
-            span = tracer.start_span(
-                SPAN_NAME,
-                kind=SpanKind.CLIENT,
-                start_time=start_time,
-                context=ctx,
-            )
-            _set_request_attributes(span, prepare_kwargs_for_shared_attributes(non_sentinel_kwargs), instance)
-
             return ResponseStream(
-                span=span,
+                span=span,  # FR: reuse early span instead of creating new one
                 response=response,
                 start_time=start_time,
                 request_kwargs=non_sentinel_kwargs,
@@ -567,18 +588,6 @@ def responses_get_or_create_wrapper(tracer: Tracer, wrapped, instance, args, kwa
         except Exception:
             traced_data = None
 
-        # Restore the original trace context to maintain trace continuity
-        ctx = (traced_data.trace_context if traced_data and traced_data.trace_context
-               else context_api.get_current())
-        span = tracer.start_span(
-            SPAN_NAME,
-            kind=SpanKind.CLIENT,
-            start_time=(
-                start_time if traced_data is None else int(traced_data.start_time)
-            ),
-            context=ctx,
-        )
-        _set_request_attributes(span, prepare_kwargs_for_shared_attributes(non_sentinel_kwargs), instance)
         span.set_attribute(ERROR_TYPE, e.__class__.__name__)
         span.record_exception(e)
         span.set_status(StatusCode.ERROR, str(e))
@@ -587,6 +596,11 @@ def responses_get_or_create_wrapper(tracer: Tracer, wrapped, instance, args, kwa
         span.end()
         raise
     parsed_response = parse_response(response)
+
+    try:  # FR: completion safety
+        apply_response_completion_safety(span, parsed_response)  # FR: completion safety
+    except Exception:  # FR: completion safety
+        pass  # FR: completion safety
 
     existing_data = responses.get(parsed_response.id)
     if existing_data is None:
@@ -638,20 +652,12 @@ def responses_get_or_create_wrapper(tracer: Tracer, wrapped, instance, args, kwa
         )
         responses[parsed_response.id] = traced_data
     except Exception:
+        span.end()  # FR: end early-created span on failure
         return response
 
     if parsed_response.status == "completed":
-        # Restore the original trace context to maintain trace continuity
-        ctx = traced_data.trace_context if traced_data.trace_context else context_api.get_current()
-        span = tracer.start_span(
-            SPAN_NAME,
-            kind=SpanKind.CLIENT,
-            start_time=int(traced_data.start_time),
-            context=ctx,
-        )
-        _set_request_attributes(span, prepare_kwargs_for_shared_attributes(non_sentinel_kwargs), instance)
-        set_data_attributes(traced_data, span)
-        span.end()
+        set_data_attributes(traced_data, span)  # FR: reuses early span
+        span.end()  # FR: reuses early span
 
     return response
 
@@ -668,21 +674,30 @@ async def async_responses_get_or_create_wrapper(
     # Remove OpenAI sentinel values (NOT_GIVEN, Omit) to allow chained .get() calls
     non_sentinel_kwargs = _sanitize_sentinel_values(kwargs)
 
+    # FR: create span early so prompt safety can attach events to it
+    ctx = context_api.get_current()  # FR: moved before wrapped() for prompt safety
+    span = tracer.start_span(  # FR: moved before wrapped() for prompt safety
+        SPAN_NAME,
+        kind=SpanKind.CLIENT,
+        start_time=start_time,
+        context=ctx,
+    )
+    _set_request_attributes(span, prepare_kwargs_for_shared_attributes(non_sentinel_kwargs), instance)  # FR: moved
+    try:  # FR: prompt safety
+        non_sentinel_kwargs = await asyncio.to_thread(apply_response_prompt_safety, span, non_sentinel_kwargs)  # FR: async safety
+    except Exception:  # FR: prompt safety
+        pass  # FR: prompt safety
+
+    # FR: merge safety-modified keys back into original kwargs (preserving sentinels)
+    for key in ("input", "instructions"):  # FR: prompt safety
+        if key in non_sentinel_kwargs:  # FR: prompt safety
+            kwargs[key] = non_sentinel_kwargs[key]  # FR: prompt safety
+
     try:
         response = await wrapped(*args, **kwargs)
         if isinstance(response, (Stream, AsyncStream)):
-            # Capture current trace context to maintain trace continuity
-            ctx = context_api.get_current()
-            span = tracer.start_span(
-                SPAN_NAME,
-                kind=SpanKind.CLIENT,
-                start_time=start_time,
-                context=ctx,
-            )
-            _set_request_attributes(span, prepare_kwargs_for_shared_attributes(non_sentinel_kwargs), instance)
-
             return ResponseStream(
-                span=span,
+                span=span,  # FR: reuse early span instead of creating new one
                 response=response,
                 start_time=start_time,
                 request_kwargs=non_sentinel_kwargs,
@@ -729,18 +744,6 @@ async def async_responses_get_or_create_wrapper(
         except Exception:
             traced_data = None
 
-        # Restore the original trace context to maintain trace continuity
-        ctx = (traced_data.trace_context if traced_data and traced_data.trace_context
-               else context_api.get_current())
-        span = tracer.start_span(
-            SPAN_NAME,
-            kind=SpanKind.CLIENT,
-            start_time=(
-                start_time if traced_data is None else int(traced_data.start_time)
-            ),
-            context=ctx,
-        )
-        _set_request_attributes(span, prepare_kwargs_for_shared_attributes(non_sentinel_kwargs), instance)
         span.set_attribute(ERROR_TYPE, e.__class__.__name__)
         span.record_exception(e)
         span.set_status(StatusCode.ERROR, str(e))
@@ -749,6 +752,11 @@ async def async_responses_get_or_create_wrapper(
         span.end()
         raise
     parsed_response = parse_response(response)
+
+    try:  # FR: completion safety
+        await asyncio.to_thread(apply_response_completion_safety, span, parsed_response)  # FR: async safety
+    except Exception:  # FR: completion safety
+        pass  # FR: completion safety
 
     existing_data = responses.get(parsed_response.id)
     if existing_data is None:
@@ -801,20 +809,12 @@ async def async_responses_get_or_create_wrapper(
         )
         responses[parsed_response.id] = traced_data
     except Exception:
+        span.end()  # FR: end early-created span on failure
         return response
 
     if parsed_response.status == "completed":
-        # Restore the original trace context to maintain trace continuity
-        ctx = traced_data.trace_context if traced_data.trace_context else context_api.get_current()
-        span = tracer.start_span(
-            SPAN_NAME,
-            kind=SpanKind.CLIENT,
-            start_time=int(traced_data.start_time),
-            context=ctx,
-        )
-        _set_request_attributes(span, prepare_kwargs_for_shared_attributes(non_sentinel_kwargs), instance)
-        set_data_attributes(traced_data, span)
-        span.end()
+        set_data_attributes(traced_data, span)  # FR: reuses early span
+        span.end()  # FR: reuses early span
 
     return response
 
@@ -898,40 +898,88 @@ class ResponseStream(ObjectProxy):
         request_kwargs=None,
         tracer=None,
         traced_data=None,
+        instance=None,  # FR: added for continuation span creation
     ):
         super().__init__(response)
         self._span = span
         self._start_time = start_time
+        self._instance = instance  # FR: stored for continuation span creation
         # Filter sentinel values (defensive, in case called directly without prior filtering)
         self._request_kwargs = _sanitize_sentinel_values(request_kwargs or {})
         self._tracer = tracer
-        self._traced_data = traced_data or TracedData(
-            start_time=start_time,
-            response_id="",
-            input=process_input(self._request_kwargs.get("input", [])),
-            instructions=self._request_kwargs.get("instructions"),
-            tools=get_tools_from_kwargs(self._request_kwargs),
-            output_blocks={},
-            usage=None,
-            output_text="",
-            request_model=self._request_kwargs.get("model", ""),
-            response_model="",
-            request_reasoning_summary=self._request_kwargs.get("reasoning", {}).get(
-                "summary"
-            ),
-            request_reasoning_effort=self._request_kwargs.get("reasoning", {}).get(
-                "effort"
-            ),
-            response_reasoning_effort=None,
-            request_service_tier=self._request_kwargs.get("service_tier"),
-            response_service_tier=None,
-        )
+
+        # FR: build traced_data, merging with existing response data for continuations
+        if traced_data is not None:  # FR: continuation support
+            self._traced_data = traced_data  # FR: continuation support
+        else:  # FR: continuation support
+            existing = self._get_existing_response_data()  # FR: continuation lookup
+            self._traced_data = TracedData(
+                start_time=existing.get("start_time", start_time),  # FR: continuation merge
+                response_id="",
+                input=existing.get(  # FR: continuation merge
+                    "input",
+                    process_input(self._request_kwargs.get("input", [])),
+                ),
+                instructions=self._request_kwargs.get(
+                    "instructions", existing.get("instructions")  # FR: continuation merge
+                ),
+                tools=get_tools_from_kwargs(self._request_kwargs)
+                or existing.get("tools"),  # FR: continuation merge
+                output_blocks=existing.get("output_blocks", {}),  # FR: continuation merge
+                usage=existing.get("usage"),  # FR: continuation merge
+                output_text=existing.get("output_text", ""),  # FR: continuation merge
+                request_model=self._request_kwargs.get(
+                    "model", existing.get("request_model", "")  # FR: continuation merge
+                ),
+                response_model=existing.get("response_model", ""),  # FR: continuation merge
+                request_reasoning_summary=self._request_kwargs.get(
+                    "reasoning", {}
+                ).get("summary", existing.get("request_reasoning_summary")),  # FR: continuation merge
+                request_reasoning_effort=self._request_kwargs.get(
+                    "reasoning", {}
+                ).get("effort", existing.get("request_reasoning_effort")),  # FR: continuation merge
+                response_reasoning_effort=existing.get("response_reasoning_effort"),  # FR: continuation merge
+                request_service_tier=self._request_kwargs.get(
+                    "service_tier", existing.get("request_service_tier")  # FR: continuation merge
+                ),
+                response_service_tier=existing.get("response_service_tier"),  # FR: continuation merge
+                trace_context=existing.get("trace_context"),  # FR: continuation merge
+            )
+
+        # FR: auto-create span for continuation-only requests (no input/instructions)
+        if self._span is None and self._tracer is not None:  # FR: continuation span
+            self._span = self._tracer.start_span(  # FR: continuation span
+                SPAN_NAME,
+                kind=SpanKind.CLIENT,
+                start_time=int(
+                    self._traced_data.start_time
+                    or start_time
+                    or time.time_ns()
+                ),
+                context=self._traced_data.trace_context
+                or context_api.get_current(),
+            )
+            _set_request_attributes(  # FR: continuation span
+                self._span,
+                prepare_kwargs_for_shared_attributes(self._request_kwargs),
+                self._instance,
+            )
 
         self._complete_response_data = None
         self._output_text = ""
 
+        self._streaming_safety = ResponsesStreamingSafety(self._span)  # FR: streaming safety
+
         self._cleanup_completed = False
         self._cleanup_lock = threading.Lock()
+
+    def _get_existing_response_data(self):  # FR: continuation support helper
+        """Look up prior response data for continuation requests."""
+        for key in ("response_id", "previous_response_id"):  # FR
+            response_id = self._request_kwargs.get(key)  # FR
+            if response_id and response_id in responses:  # FR
+                return responses[response_id].model_dump()  # FR
+        return {}  # FR
 
     def __del__(self):
         """Cleanup when object is garbage collected"""
@@ -1028,6 +1076,11 @@ class ResponseStream(ObjectProxy):
 
     def _process_chunk(self, chunk):
         """Process a streaming chunk"""
+        try:  # FR: streaming safety - process chunk for masking
+            chunk = self._streaming_safety.process_chunk(chunk)  # FR: streaming safety
+        except Exception:  # FR: streaming safety
+            pass  # FR: streaming safety
+
         if hasattr(chunk, "type"):
             if chunk.type == "response.output_text.delta":
                 if hasattr(chunk, "delta") and chunk.delta:
@@ -1055,7 +1108,15 @@ class ResponseStream(ObjectProxy):
 
                     self._traced_data.response_id = parsed_response.id
                     self._traced_data.response_model = parsed_response.model
-                    self._traced_data.output_text = self._output_text
+
+                    # FR: flush streaming safety text and use as output
+                    try:  # FR: streaming safety flush
+                        final_output_text = self._streaming_safety.aggregated_text()  # FR
+                        if not final_output_text:  # FR
+                            final_output_text = self._streaming_safety.flush_text()  # FR
+                        self._traced_data.output_text = final_output_text or self._output_text  # FR
+                    except Exception:  # FR
+                        self._traced_data.output_text = self._output_text  # FR (original TL line)
 
                     if parsed_response.usage:
                         self._traced_data.usage = parsed_response.usage
@@ -1064,6 +1125,16 @@ class ResponseStream(ObjectProxy):
                         self._traced_data.output_blocks = {
                             block.id: block for block in parsed_response.output
                         }
+
+                    # FR: apply completion safety on the parsed response
+                    try:  # FR: completion safety
+                        masked_output_text = apply_response_completion_safety(  # FR
+                            self._span, parsed_response  # FR
+                        )  # FR
+                        if masked_output_text is not None:  # FR
+                            self._traced_data.output_text = masked_output_text  # FR
+                    except Exception:  # FR
+                        pass  # FR
 
                     responses[parsed_response.id] = self._traced_data
 

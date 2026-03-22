@@ -1,5 +1,6 @@
 """OpenTelemetry Ollama instrumentation"""
 
+import asyncio  # FR: async safety
 import json
 import logging
 import os
@@ -17,6 +18,9 @@ from opentelemetry.instrumentation.ollama.event_emitter import (
 from opentelemetry.instrumentation.ollama.safety import (
     _apply_completion_safety,
     _apply_prompt_safety,
+)
+from opentelemetry.instrumentation.ollama.streaming_safety import (
+    OllamaStreamingSafety,
 )
 from opentelemetry.instrumentation.ollama.span_utils import (
     set_input_attributes,
@@ -108,8 +112,14 @@ def _accumulate_streaming_response(
     first_token = True
     first_token_time = None
     last_response = None
+    streaming_safety = OllamaStreamingSafety(
+        span,
+        llm_request_type,
+        getattr(span, "name", f"ollama.{llm_request_type.value}"),
+    )
 
     for res in response:
+        res = streaming_safety.process_chunk(res)
         last_response = res  # Track the last response explicitly
 
         if first_token and streaming_time_to_first_token and start_time is not None:
@@ -172,8 +182,14 @@ async def _aaccumulate_streaming_response(
     first_token = True
     first_token_time = None
     last_response = None
+    streaming_safety = OllamaStreamingSafety(
+        span,
+        llm_request_type,
+        getattr(span, "name", f"ollama.{llm_request_type.value}"),
+    )
 
     async for res in response:
+        res = streaming_safety.process_chunk(res)
         last_response = res
 
         if first_token and streaming_time_to_first_token and start_time is not None:
@@ -387,7 +403,7 @@ async def _awrap(
         },
     )
 
-    kwargs = _apply_prompt_safety(span, kwargs, llm_request_type, name)
+    kwargs = await asyncio.to_thread(_apply_prompt_safety, span, kwargs, llm_request_type, name)  # FR: async safety
     _handle_input(span, event_logger, llm_request_type, args, kwargs)
 
     start_time = time.perf_counter()
@@ -421,7 +437,7 @@ async def _awrap(
                 start_time,
             )
 
-        _apply_completion_safety(span, response, llm_request_type, name)
+        await asyncio.to_thread(_apply_completion_safety, span, response, llm_request_type, name)  # FR: async safety
         _handle_response(
             span, event_logger, llm_request_type, token_histogram, response
         )

@@ -1,5 +1,6 @@
 """OpenTelemetry Groq instrumentation"""
 
+import asyncio  # FR: async safety
 import logging
 import os
 import time
@@ -16,6 +17,9 @@ from opentelemetry.instrumentation.groq.event_emitter import (
 from opentelemetry.instrumentation.groq.safety import (
     _apply_completion_safety,
     _apply_prompt_safety,
+)
+from opentelemetry.instrumentation.groq.streaming_safety import (
+    GroqStreamingSafety,
 )
 from opentelemetry.instrumentation.groq.span_utils import (
     set_input_attributes,
@@ -162,8 +166,10 @@ def _create_stream_processor(response, span, event_logger):
     accumulated_content = ""
     finish_reason = None
     usage = None
+    streaming_safety = GroqStreamingSafety(span, "groq.chat")
 
     for chunk in response:
+        chunk = streaming_safety.process_chunk(chunk)
         content, chunk_finish_reason, chunk_usage = _process_streaming_chunk(chunk)
         if content:
             accumulated_content += content
@@ -188,8 +194,10 @@ async def _create_async_stream_processor(response, span, event_logger):
     accumulated_content = ""
     finish_reason = None
     usage = None
+    streaming_safety = GroqStreamingSafety(span, "groq.chat")
 
     async for chunk in response:
+        chunk = streaming_safety.process_chunk(chunk)
         content, chunk_finish_reason, chunk_usage = _process_streaming_chunk(chunk)
         if content:
             accumulated_content += content
@@ -338,7 +346,7 @@ async def _awrap(
         },
     )
 
-    kwargs = _apply_prompt_safety(span, kwargs, name)
+    kwargs = await asyncio.to_thread(_apply_prompt_safety, span, kwargs, name)  # FR: async safety
     _handle_input(span, kwargs, event_logger)
 
     start_time = time.time()
@@ -378,7 +386,7 @@ async def _awrap(
                 attributes=metric_attributes,
             )
 
-        _apply_completion_safety(span, response, name)
+        await asyncio.to_thread(_apply_completion_safety, span, response, name)  # FR: async safety
         _handle_response(span, response, token_histogram, event_logger)
 
         if span.is_recording():

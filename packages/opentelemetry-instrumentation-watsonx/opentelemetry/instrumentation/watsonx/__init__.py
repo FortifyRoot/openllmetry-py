@@ -22,6 +22,9 @@ from opentelemetry.instrumentation.watsonx.safety import (
     _apply_completion_safety,
     _apply_prompt_safety,
 )
+from opentelemetry.instrumentation.watsonx.streaming_runtime import (
+    build_and_set_stream_response_delegate as _fr_build_and_set_stream_response,
+)
 from opentelemetry.instrumentation.watsonx.utils import (
     dont_throw,
     should_emit_events,
@@ -450,6 +453,9 @@ def _build_and_set_stream_response(
     span.end()
 
 
+_build_and_set_stream_response = _fr_build_and_set_stream_response
+
+
 def _metric_shared_attributes(response_model: str, is_streaming: bool = False):
     return {
         GenAIAttributes.GEN_AI_RESPONSE_MODEL: response_model,
@@ -583,7 +589,7 @@ def _wrap(
     )
 
     args, kwargs = _apply_prompt_safety(span, args, kwargs, name)
-    _handle_input(span, event_logger, name, instance, args, kwargs)
+    _handle_input(span, event_logger, name, instance, response_counter, args, kwargs)
 
     if "generate" in name:
         if to_wrap.get("method") == "generate_text_stream":

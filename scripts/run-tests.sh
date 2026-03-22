@@ -3,16 +3,18 @@
 # Examples:
 # Run every discovered package test suite:
 #   ./scripts/run-tests.sh
-# Run only tests marked with `@pytest.mark.safety` across matching packages:
-#   ./scripts/run-tests.sh --safety
+# Run only tests marked with `@pytest.mark.fr` across matching packages:
+#   ./scripts/run-tests.sh --fr
 # Run all tests for packages whose basename matches a glob:
 #   ./scripts/run-tests.sh --package '*openai*'
-# Run only tests marked with `@pytest.mark.safety` for a selected package glob:
-#   ./scripts/run-tests.sh --safety --package '*anthropic*'
+# Run only tests marked with `@pytest.mark.fr` for a selected package glob:
+#   ./scripts/run-tests.sh --fr --package '*anthropic*'
 # List all discovered packages without running tests:
 #   ./scripts/run-tests.sh --list
+# Override the per-package test timeout:
+#   PACKAGE_TEST_TIMEOUT_SECONDS=1800 ./scripts/run-tests.sh --fr
 # Forward extra pytest arguments after `--`:
-#   ./scripts/run-tests.sh --safety -- -x
+#   ./scripts/run-tests.sh --fr -- -x
 
 set -euo pipefail
 
@@ -23,6 +25,7 @@ REPORTS_ROOT="$ROOT_DIR/reports/test-run"
 TIMESTAMP="$(date +"%Y%m%d-%H%M%S")"
 REPORT_DIR="$REPORTS_ROOT/$TIMESTAMP"
 STATE_DIR="$REPORT_DIR/state"
+PACKAGE_TEST_TIMEOUT_SECONDS="${PACKAGE_TEST_TIMEOUT_SECONDS:-1200}"
 
 MODE="all"
 PACKAGE_FILTER=""
@@ -37,16 +40,17 @@ usage() {
 Usage: scripts/run-tests.sh [options] [-- <extra pytest args>]
 
 Options:
-  --safety           Run only tests marked with @pytest.mark.safety
+  --fr               Run only tests marked with @pytest.mark.fr
   --package <glob>   Restrict packages by basename glob, e.g. "*openai*"
   --list             List discovered packages and exit
   -h, --help         Show this help
 
 Examples:
   scripts/run-tests.sh
-  scripts/run-tests.sh --safety
+  scripts/run-tests.sh --fr
   scripts/run-tests.sh --package "*openai*"
-  scripts/run-tests.sh --safety -- -x
+  PACKAGE_TEST_TIMEOUT_SECONDS=1800 scripts/run-tests.sh --fr
+  scripts/run-tests.sh --fr -- -x
 EOF
 }
 
@@ -101,7 +105,6 @@ mark_package_seen() {
 
 bootstrap_venv() {
   require_cmd python3
-  require_cmd poetry
 
   if [[ ! -x "$VENV_DIR/bin/python" ]]; then
     log "Creating shared virtualenv at $VENV_DIR"
@@ -110,11 +113,12 @@ bootstrap_venv() {
 
   # shellcheck disable=SC1091
   source "$VENV_DIR/bin/activate"
-  export POETRY_VIRTUALENVS_CREATE=false
   export PIP_DISABLE_PIP_VERSION_CHECK=1
 
   log "Bootstrapping shared virtualenv"
   python -m pip install --upgrade pip setuptools wheel >/dev/null
+  # tomli is the backport of tomllib for Python < 3.11
+  python -m pip install tomli >/dev/null 2>&1 || true
 }
 
 discover_packages() {
@@ -140,17 +144,51 @@ has_tests_directory() {
   [[ -d "$package_dir/tests" ]]
 }
 
-is_candidate_for_safety_mode() {
+has_marker_in_tests() {
   local package_dir="$1"
-
-  has_tests_directory "$package_dir" || return 1
+  local marker="$2"
 
   if command -v rg >/dev/null 2>&1; then
-    rg -l 'pytest\.mark\.safety' "$package_dir/tests" >/dev/null 2>&1
+    rg -l "pytest\\.mark\\.${marker}" "$package_dir/tests" >/dev/null 2>&1
     return $?
   fi
 
-  grep -RIl -E 'pytest\.mark\.safety' "$package_dir/tests" >/dev/null 2>&1
+  grep -RIl -E "pytest\\.mark\\.${marker}" "$package_dir/tests" >/dev/null 2>&1
+}
+
+has_fr_source_files() {
+  # Check if a package contains FR-authored source files (safety.py,
+  # streaming_safety.py, etc.) that indicate it has FR modifications.
+  local package_dir="$1"
+  find "$package_dir" -path '*/tests' -prune -o \
+    \( -name 'safety.py' -o -name 'streaming_safety.py' -o -name 'safety_registration.py' \) \
+    -print -quit 2>/dev/null | grep -q .
+}
+
+validate_fr_test_coverage() {
+  # In --fr mode, warn about packages that have FR source files but no
+  # FR-marked tests.  This catches cases where new safety code was added
+  # to a package but the developer forgot to add @pytest.mark.fr tests.
+  local -a gap_packages=()
+  local package_dir
+
+  for package_dir in "$@"; do
+    if has_fr_source_files "$package_dir"; then
+      if ! has_tests_directory "$package_dir" || ! has_marker_in_tests "$package_dir" "fr"; then
+        gap_packages+=("$(basename "$package_dir")")
+      fi
+    fi
+  done
+
+  if (( ${#gap_packages[@]} > 0 )); then
+    printf '\n'
+    log "WARNING: The following packages have FR safety source files but NO @pytest.mark.fr tests:"
+    for pkg in "${gap_packages[@]}"; do
+      log "  - $pkg"
+    done
+    log "Add FR-marked tests to these packages to ensure safety code is covered."
+    printf '\n'
+  fi
 }
 
 python_meta() {
@@ -161,7 +199,10 @@ python_meta() {
 import json
 import pathlib
 import sys
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
 
 package_dir = pathlib.Path(sys.argv[1]).resolve()
 key = sys.argv[2]
@@ -231,7 +272,7 @@ install_package() {
   set +e
   (
     cd "$package_dir"
-    poetry run python -m pip install "${pip_args[@]}"
+    python -m pip install "${pip_args[@]}"
   ) > >(tee "$install_log") 2>&1
   local install_status=$?
   set -e
@@ -293,6 +334,30 @@ print(json.dumps(summary))
 PY
 }
 
+run_with_timeout() {
+  local timeout_seconds="$1"
+  shift
+
+  python3 - "$timeout_seconds" "$@" <<'PY'
+import subprocess
+import sys
+
+timeout_seconds = int(sys.argv[1])
+command = sys.argv[2:]
+
+try:
+    completed = subprocess.run(command, timeout=timeout_seconds)
+except subprocess.TimeoutExpired:
+    print(
+        f"[run-tests] ERROR: command timed out after {timeout_seconds} seconds",
+        file=sys.stderr,
+    )
+    raise SystemExit(124)
+
+raise SystemExit(completed.returncode)
+PY
+}
+
 record_test_summary() {
   local package_name="$1"
   local junit_xml="$2"
@@ -329,9 +394,9 @@ run_package_tests() {
     return 0
   fi
 
-  if [[ "$MODE" == "safety" ]] && ! is_candidate_for_safety_mode "$package_dir"; then
+  if [[ "$MODE" == "fr" ]] && ! has_marker_in_tests "$package_dir" "fr"; then
     set_state "$package_name" "status" "SKIP"
-    set_state "$package_name" "reason" "No safety-related tests detected"
+    set_state "$package_name" "reason" "No FR-marked tests detected"
     return 0
   fi
 
@@ -342,17 +407,19 @@ run_package_tests() {
   local junit_xml="$REPORT_DIR/${package_name}.xml"
   local test_log="$REPORT_DIR/${package_name}.test.log"
   local -a pytest_cmd
-  pytest_cmd=(poetry run pytest -q --junitxml "$junit_xml" tests)
-  if [[ "$MODE" == "safety" ]]; then
-    pytest_cmd+=(-m safety)
+  if [[ "$MODE" == "fr" ]]; then
+    pytest_cmd=(python -m pytest -q --junitxml "$junit_xml" tests)
+    pytest_cmd+=(-m fr)
+  else
+    pytest_cmd=(python -m pytest -q --junitxml "$junit_xml" tests)
   fi
   pytest_cmd+=("${PYTEST_ARGS[@]:-}")
 
-  log "Running tests for $package_name"
+  log "Running tests for $package_name (timeout=${PACKAGE_TEST_TIMEOUT_SECONDS}s)"
   set +e
   (
     cd "$package_dir"
-    "${pytest_cmd[@]}"
+    run_with_timeout "$PACKAGE_TEST_TIMEOUT_SECONDS" "${pytest_cmd[@]}"
   ) > >(tee "$test_log") 2>&1
   local test_status=$?
   set -e
@@ -367,6 +434,9 @@ run_package_tests() {
 
   if [[ $test_status -eq 0 ]]; then
     set_state "$package_name" "status" "PASS"
+  elif [[ $test_status -eq 124 ]]; then
+    set_state "$package_name" "status" "FAIL"
+    set_state "$package_name" "reason" "Timed out after ${PACKAGE_TEST_TIMEOUT_SECONDS}s. See $test_log"
   else
     set_state "$package_name" "status" "FAIL"
     set_state "$package_name" "reason" "Test failures detected. See $test_log"
@@ -379,8 +449,22 @@ print_report() {
   local failed=0
   local skipped=0
   local install_failed=0
+  local tests_total=0
+  local tests_passed=0
+  local tests_failed=0
+  local tests_skipped=0
   local package_name
+  local package_counts
+  local counts_field
+  local counts_value
+  local package_passed
+  local package_failed
+  local package_errors
+  local package_skipped
+  local package_total
   local -a failing_lines=()
+  local -a skipped_lines=()
+  local -a executed_lines=()
 
   printf '\n=== Consolidated Test Report ===\n'
   printf 'Mode: %s\n' "$MODE"
@@ -391,11 +475,51 @@ print_report() {
     case "$(get_state "$package_name" "status")" in
       PASS)
         passed=$((passed + 1))
-        printf 'PASS  %-50s %s\n' "$package_name" "$(get_state "$package_name" "counts")"
+        package_counts="$(get_state "$package_name" "counts")"
+        executed_lines+=("$(printf 'PASS  %-50s %s' "$package_name" "$package_counts")")
+        package_passed=0
+        package_failed=0
+        package_errors=0
+        package_skipped=0
+        package_total=0
+        for counts_field in $package_counts; do
+          counts_value="${counts_field#*=}"
+          case "$counts_field" in
+            passed=*) package_passed="$counts_value" ;;
+            failed=*) package_failed="$counts_value" ;;
+            errors=*) package_errors="$counts_value" ;;
+            skipped=*) package_skipped="$counts_value" ;;
+            total=*) package_total="$counts_value" ;;
+          esac
+        done
+        tests_total=$((tests_total + package_total))
+        tests_passed=$((tests_passed + package_passed))
+        tests_failed=$((tests_failed + package_failed + package_errors))
+        tests_skipped=$((tests_skipped + package_skipped))
         ;;
       FAIL)
         failed=$((failed + 1))
-        printf 'FAIL  %-50s %s\n' "$package_name" "$(get_state "$package_name" "counts")"
+        package_counts="$(get_state "$package_name" "counts")"
+        executed_lines+=("$(printf 'FAIL  %-50s %s' "$package_name" "$package_counts")")
+        package_passed=0
+        package_failed=0
+        package_errors=0
+        package_skipped=0
+        package_total=0
+        for counts_field in $package_counts; do
+          counts_value="${counts_field#*=}"
+          case "$counts_field" in
+            passed=*) package_passed="$counts_value" ;;
+            failed=*) package_failed="$counts_value" ;;
+            errors=*) package_errors="$counts_value" ;;
+            skipped=*) package_skipped="$counts_value" ;;
+            total=*) package_total="$counts_value" ;;
+          esac
+        done
+        tests_total=$((tests_total + package_total))
+        tests_passed=$((tests_passed + package_passed))
+        tests_failed=$((tests_failed + package_failed + package_errors))
+        tests_skipped=$((tests_skipped + package_skipped))
         if [[ -n "$(get_state "$package_name" "failures")" ]]; then
           while IFS= read -r failing_test; do
             [[ -n "$failing_test" ]] || continue
@@ -405,15 +529,32 @@ print_report() {
         ;;
       INSTALL_FAIL)
         install_failed=$((install_failed + 1))
-        printf 'ERROR %-50s %s\n' "$package_name" "$(get_state "$package_name" "reason")"
+        executed_lines+=("$(printf 'ERROR %-50s %s' "$package_name" "$(get_state "$package_name" "reason")")")
         failing_lines+=("$package_name :: [install] $(get_state "$package_name" "reason")")
         ;;
       *)
         skipped=$((skipped + 1))
-        printf 'SKIP  %-50s %s\n' "$package_name" "$(get_state "$package_name" "reason")"
+        skipped_lines+=("$(printf 'SKIP  %-50s %s' "$package_name" "$(get_state "$package_name" "reason")")")
         ;;
     esac
   done
+
+  printf 'Skipped packages:\n'
+  if (( ${#skipped_lines[@]} > 0 )); then
+    printf '%s\n' "${skipped_lines[@]}"
+  else
+    printf ' - none\n'
+  fi
+
+  printf '\nExecuted packages:\n'
+  if (( ${#executed_lines[@]} > 0 )); then
+    printf '%s\n' "${executed_lines[@]}"
+  else
+    printf ' - none\n'
+  fi
+
+  printf '\nOverall tests run: total = %d passed = %d failed = %d skipped = %d\n' \
+    "$tests_total" "$tests_passed" "$tests_failed" "$tests_skipped"
 
   printf '\nPackages: total=%d passed=%d failed=%d install_failed=%d skipped=%d\n' \
     "$total" "$passed" "$failed" "$install_failed" "$skipped"
@@ -437,8 +578,8 @@ print_report() {
 main() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --safety)
-        MODE="safety"
+      --fr)
+        MODE="fr"
         shift
         ;;
       --package)
@@ -483,6 +624,13 @@ main() {
   if (( LIST_ONLY == 1 )); then
     printf '%s\n' "${package_dirs[@]}"
     exit 0
+  fi
+
+  # In --fr mode, validate that every package with FR source files also
+  # has FR-marked tests.  This runs before test execution so gaps are
+  # visible even if the test run itself is aborted.
+  if [[ "$MODE" == "fr" ]]; then
+    validate_fr_test_coverage "${package_dirs[@]}"
   fi
 
   local package_name

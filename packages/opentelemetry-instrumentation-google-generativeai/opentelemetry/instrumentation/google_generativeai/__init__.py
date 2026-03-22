@@ -1,5 +1,6 @@
 """OpenTelemetry Google Generative AI API instrumentation"""
 
+import asyncio  # FR: async safety
 import logging
 import os
 import time
@@ -17,6 +18,10 @@ from opentelemetry.instrumentation.google_generativeai.event_emitter import (
 from opentelemetry.instrumentation.google_generativeai.safety import (
     _apply_completion_safety,
     _apply_prompt_safety,
+)
+from opentelemetry.instrumentation.google_generativeai.streaming_runtime import (
+    build_async_streaming_response_delegate as _fr_build_async_streaming_response,
+    build_streaming_response_delegate as _fr_build_streaming_response,
 )
 from opentelemetry.instrumentation.google_generativeai.span_utils import (
     set_input_attributes_sync,
@@ -130,6 +135,10 @@ async def _abuild_from_streaming_response(
     span.end()
 
 
+_build_from_streaming_response = _fr_build_streaming_response
+_abuild_from_streaming_response = _fr_build_async_streaming_response
+
+
 @dont_throw
 def _handle_request(span, args, kwargs, llm_model, event_logger):
     if should_emit_events() and event_logger:
@@ -214,7 +223,7 @@ async def _awrap(
         },
     )
     start_time = time.perf_counter()
-    args, kwargs = _apply_prompt_safety(span, args, kwargs, name)
+    args, kwargs = await asyncio.to_thread(_apply_prompt_safety, span, args, kwargs, name)  # FR: async safety
     _handle_request(span, args, kwargs, llm_model, event_logger)
     try:
         response = await wrapped(*args, **kwargs)
@@ -243,7 +252,7 @@ async def _awrap(
                 span, response, llm_model, event_logger, token_histogram
             )
         else:
-            _apply_completion_safety(span, response, name)
+            await asyncio.to_thread(_apply_completion_safety, span, response, name)  # FR: async safety
             _handle_response(
                 span, response, llm_model, event_logger, token_histogram
             )

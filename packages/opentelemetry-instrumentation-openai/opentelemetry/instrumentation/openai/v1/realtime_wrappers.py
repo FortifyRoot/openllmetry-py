@@ -12,9 +12,14 @@ Key concepts:
 - A "response" span covers each response.create -> response.done cycle
 - Token usage is captured from response.done events
 """
+# FR ARCHITECTURE NOTE: Streaming safety requires event expansion (1:N) in
+# recv() and __anext__. The deque-based pending_events pattern handles this.
+# Safety events (e.g., masked deltas split into multiple events) are queued
+# and served on subsequent recv/anext calls.
 
 import json
 import time
+from collections import deque  # FR: needed for pending_events queues
 from typing import Optional
 
 from opentelemetry import context as context_api
@@ -34,6 +39,14 @@ from opentelemetry.instrumentation.openai.utils import (
     _with_tracer_wrapper,
     dont_throw,
     should_send_prompts,
+)
+# FR: safety imports for streaming safety, prompt safety, and input extraction
+from opentelemetry.instrumentation.openai.v1.realtime_safety import (
+    RealtimeStreamingSafety,
+    apply_realtime_event_prompt_safety,
+    apply_realtime_item_prompt_safety,
+    apply_realtime_session_prompt_safety,
+    extract_realtime_input_text,
 )
 
 
@@ -64,6 +77,7 @@ class RealtimeEventProcessor:
 
     def __init__(self, state: RealtimeSessionState):
         self._state = state
+        self._streaming_safety = RealtimeStreamingSafety(state.response_span)  # FR: init streaming safety
 
     @dont_throw
     def process_event(self, event):
@@ -88,6 +102,29 @@ class RealtimeEventProcessor:
             self.handle_response_done(event)
         elif event_type == "error":
             self.handle_error_event(event)
+
+    # FR: entire method - expands one event into 1:N via streaming safety,
+    # FR: then processes each expanded event through the normal handlers.
+    @dont_throw
+    def expand_and_process_event(self, event, *, start_span_if_none: bool):
+        events = self._streaming_safety.process_event(  # FR: event expansion
+            self._state.current_response_id, event
+        )
+        processed_events = []  # FR
+        for item in events:  # FR
+            event_type = getattr(item, "type", None)  # FR
+            if not event_type:  # FR
+                processed_events.append(item)  # FR
+                continue  # FR
+
+            if event_type == "response.created":  # FR
+                self.handle_response_created(  # FR
+                    item, start_span_if_none=start_span_if_none  # FR
+                )  # FR
+            else:  # FR
+                self.process_event(item)  # FR
+            processed_events.append(item)  # FR
+        return processed_events  # FR
 
     @dont_throw
     def handle_session_created(self, event):
@@ -135,12 +172,14 @@ class RealtimeEventProcessor:
     @dont_throw
     def handle_response_created(self, event, start_span_if_none: bool = False):
         """Handle response.created event - response cycle started."""
-        if hasattr(event, "response") and hasattr(event.response, "id"):
-            self._state.current_response_id = event.response.id
-
+        # FR: moved span-start before response_id assignment so safety gets the span
         # Optionally start span if not already started (used by iterator)
         if start_span_if_none and self._state.response_span is None:
             self.start_response_span()
+
+        if hasattr(event, "response") and hasattr(event.response, "id"):
+            self._state.current_response_id = event.response.id
+        self._streaming_safety = RealtimeStreamingSafety(self._state.response_span)  # FR: reinit streaming safety for new response
 
     @dont_throw
     def handle_text_delta(self, event):
@@ -170,6 +209,14 @@ class RealtimeEventProcessor:
             return
 
         span = self._state.response_span
+        # FR: flush any buffered tail content from streaming safety before ending span
+        text_tail, transcript_tail = self._streaming_safety.consume_done_tails(  # FR
+            self._state.current_response_id  # FR
+        )  # FR
+        if text_tail:  # FR
+            self._state.accumulated_text += text_tail  # FR
+        if transcript_tail:  # FR
+            self._state.accumulated_audio_transcript += transcript_tail  # FR
 
         if span.is_recording():
             # Set response attributes
@@ -298,6 +345,7 @@ class RealtimeEventProcessor:
             start_time=self._state.response_start_time,
             context=ctx,
         )
+        self._streaming_safety = RealtimeStreamingSafety(self._state.response_span)  # FR: reinit streaming safety for new span
 
         if self._state.response_span.is_recording():
             _set_span_attribute(
@@ -353,6 +401,7 @@ class RealtimeConnectionWrapper:
         self._state = state
         self._processor = RealtimeEventProcessor(state)
         self._closed = False
+        self._pending_events = deque()  # FR: queue for expanded safety events
 
     def __getattr__(self, name):
         """Delegate attribute access to the wrapped connection."""
@@ -377,9 +426,14 @@ class RealtimeConnectionWrapper:
 
     async def recv(self):
         """Receive and process an event."""
+        if self._pending_events:  # FR: serve queued expanded events first
+            return self._pending_events.popleft()  # FR
         event = await self._connection.recv()
-        self._processor.process_event(event)
-        return event
+        events = self._process_incoming_event(event)  # FR: expand via streaming safety
+        if not events:  # FR
+            return event  # FR
+        self._pending_events.extend(events[1:])  # FR: queue remaining expanded events
+        return events[0]  # FR
 
     def recv_bytes(self):
         """Delegate to wrapped connection."""
@@ -387,6 +441,10 @@ class RealtimeConnectionWrapper:
 
     async def send(self, event):
         """Send an event, tracking response.create."""
+        event = apply_realtime_event_prompt_safety(  # FR: apply prompt safety to outgoing events
+            event,
+            span=self._state.response_span or self._state.session_span,
+        )
         self._process_outgoing_event(event)
         return await self._connection.send(event)
 
@@ -430,6 +488,11 @@ class RealtimeConnectionWrapper:
         elif event_type == "conversation.item.create":
             self._track_input(event)
 
+    # FR: entire method - delegates to expand_and_process_event for 1:N event expansion
+    @dont_throw
+    def _process_incoming_event(self, event):
+        return self._processor.expand_and_process_event(event, start_span_if_none=False)  # FR
+
     @dont_throw
     def _track_input(self, event):
         """Track input from conversation.item.create events."""
@@ -438,15 +501,9 @@ class RealtimeConnectionWrapper:
         else:
             item = getattr(event, "item", {})
 
-        if isinstance(item, dict):
-            content = item.get("content", [])
-            for block in content:
-                if isinstance(block, dict):
-                    if block.get("type") == "input_text":
-                        self._state.input_text = block.get("text", "")
-                    elif block.get("type") == "input_audio":
-                        # Audio input - could capture transcript if available
-                        pass
+        input_text = extract_realtime_input_text(item)  # FR: use shared extraction helper
+        if input_text is not None:  # FR
+            self._state.input_text = input_text  # FR
 
     def _handle_error(self, error):
         """Handle connection errors."""
@@ -484,28 +541,29 @@ class RealtimeEventIterator:
         self._state = state
         self._processor = processor
         self._iterator = connection.__aiter__()
+        self._pending_events = deque()  # FR: queue for expanded safety events
 
     def __aiter__(self):
         return self
 
     async def __anext__(self):
+        if self._pending_events:  # FR: serve queued expanded events first
+            return self._pending_events.popleft()  # FR
         event = await self._iterator.__anext__()
-        self._process_event(event)
-        return event
+        events = self._process_event(event)  # FR: expand via streaming safety
+        if not events:  # FR
+            return event  # FR
+        self._pending_events.extend(events[1:])  # FR: queue remaining expanded events
+        return events[0]  # FR
 
+    # FR: rewritten to use expand_and_process_event for 1:N safety expansion
     @dont_throw
     def _process_event(self, event):
         """Process server events to track response lifecycle."""
-        event_type = getattr(event, "type", None)
-        if not event_type:
-            return
-
-        # For response.created, start span if not already started
-        if event_type == "response.created":
-            self._processor.handle_response_created(event, start_span_if_none=True)
-        else:
-            # Delegate all other events to the shared processor
-            self._processor.process_event(event)
+        return self._processor.expand_and_process_event(  # FR
+            event,  # FR
+            start_span_if_none=True,  # FR
+        )  # FR
 
 
 class RealtimeSessionWrapper:
@@ -520,6 +578,7 @@ class RealtimeSessionWrapper:
 
     async def update(self, **kwargs):
         """Wrap session.update to track configuration changes."""
+        kwargs = apply_realtime_session_prompt_safety(kwargs, span=self._state.session_span)  # FR: apply session prompt safety
         result = await self._session.update(**kwargs)
 
         # Track session config updates
@@ -574,17 +633,14 @@ class RealtimeConversationItemWrapper:
 
     async def create(self, **kwargs):
         """Wrap item.create to track user input."""
+        kwargs = apply_realtime_item_prompt_safety(kwargs, span=self._state.session_span)  # FR: apply item prompt safety
         result = await self._item.create(**kwargs)
 
         # Track input for the span
         if "item" in kwargs:
-            item = kwargs["item"]
-            if isinstance(item, dict):
-                content = item.get("content", [])
-                for block in content:
-                    if isinstance(block, dict):
-                        if block.get("type") == "input_text":
-                            self._state.input_text = block.get("text", "")
+            input_text = extract_realtime_input_text(kwargs["item"])  # FR: use shared extraction helper
+            if input_text is not None:  # FR
+                self._state.input_text = input_text  # FR
 
         return result
 

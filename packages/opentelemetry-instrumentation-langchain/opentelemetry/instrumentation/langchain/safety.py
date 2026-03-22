@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio  # FR: async safety
+import logging
 from typing import Any
 
 from opentelemetry.instrumentation.fortifyroot import (
@@ -14,11 +16,13 @@ from opentelemetry.instrumentation.fortifyroot import (
 from opentelemetry.instrumentation.langchain.vendor_detection import (
     detect_vendor_from_class,
 )
+from opentelemetry import trace
 from opentelemetry.instrumentation.utils import unwrap
 from opentelemetry.semconv_ai import LLMRequestTypeValues
 from wrapt import wrap_function_wrapper
 
 PROVIDER = "Langchain"
+logger = logging.getLogger(__name__)
 
 
 def base_chat_model_generate_wrapper(wrapped, instance, args, kwargs):
@@ -27,7 +31,9 @@ def base_chat_model_generate_wrapper(wrapped, instance, args, kwargs):
 
 
 async def base_chat_model_agenerate_wrapper(wrapped, instance, args, kwargs):
-    updated_args, updated_kwargs = _apply_chat_prompt_safety(instance, args, kwargs)
+    updated_args, updated_kwargs = await asyncio.to_thread(  # FR: async safety
+        _apply_chat_prompt_safety, instance, args, kwargs
+    )
     return await wrapped(*updated_args, **updated_kwargs)
 
 
@@ -37,7 +43,9 @@ def base_llm_generate_wrapper(wrapped, instance, args, kwargs):
 
 
 async def base_llm_agenerate_wrapper(wrapped, instance, args, kwargs):
-    updated_args, updated_kwargs = _apply_llm_prompt_safety(instance, args, kwargs)
+    updated_args, updated_kwargs = await asyncio.to_thread(  # FR: async safety
+        _apply_llm_prompt_safety, instance, args, kwargs
+    )
     return await wrapped(*updated_args, **updated_kwargs)
 
 
@@ -51,7 +59,7 @@ async def base_chat_model_agenerate_with_cache_wrapper(
     wrapped, instance, args, kwargs
 ):
     response = await wrapped(*args, **kwargs)
-    _apply_chat_result_completion_safety(instance, response)
+    await asyncio.to_thread(_apply_chat_result_completion_safety, instance, response)  # FR: async safety
     return response
 
 
@@ -63,7 +71,7 @@ def base_llm_generate_helper_wrapper(wrapped, instance, args, kwargs):
 
 async def base_llm_agenerate_helper_wrapper(wrapped, instance, args, kwargs):
     response = await wrapped(*args, **kwargs)
-    _apply_llm_result_completion_safety(instance, response)
+    await asyncio.to_thread(_apply_llm_result_completion_safety, instance, response)  # FR: async safety
     return response
 
 
@@ -360,7 +368,7 @@ def _mask_prompt_text(
     metadata=None,
 ):
     result = run_prompt_safety(
-        span=None,
+        span=trace.get_current_span(),
         provider=provider,
         span_name=span_name,
         text=text,
@@ -383,7 +391,7 @@ def _mask_completion_text(
     segment_role,
 ):
     result = run_completion_safety(
-        span=None,
+        span=trace.get_current_span(),
         provider=provider,
         span_name=span_name,
         text=text,
@@ -413,16 +421,13 @@ def _message_role(message) -> str:
 
 
 def _content_text(block):
-    if get_object_value(block, "type") == "text":
-        return get_object_value(block, "text")
-    if get_object_value(block, "text") is not None:
+    block_type = get_object_value(block, "type")
+    if block_type in (None, "text"):
         return get_object_value(block, "text")
     return None
 
 
 def _set_content_text(block, value):
-    if get_object_value(block, "type") == "text":
-        return set_object_value(block, "text", value)
     return set_object_value(block, "text", value)
 
 
@@ -480,9 +485,25 @@ _WRAPPED_METHODS = (
 
 def instrument_safety_wrappers():
     for module_name, function_name, wrapper in _WRAPPED_METHODS:
-        wrap_function_wrapper(module_name, function_name, wrapper)
+        try:
+            wrap_function_wrapper(module_name, function_name, wrapper)
+        except Exception:
+            logger.warning(
+                "Failed to install LangChain safety wrapper for %s.%s",
+                module_name,
+                function_name,
+                exc_info=True,
+            )
 
 
 def uninstrument_safety_wrappers():
     for module_name, function_name, _ in _WRAPPED_METHODS:
-        unwrap(module_name, function_name)
+        try:
+            unwrap(module_name, function_name)
+        except Exception:
+            logger.debug(
+                "Failed to remove LangChain safety wrapper for %s.%s",
+                module_name,
+                function_name,
+                exc_info=True,
+            )

@@ -13,6 +13,7 @@ from opentelemetry.instrumentation.fortifyroot import (
     SafetyResult,
     clear_safety_handlers,
     register_completion_safety_handler,
+    register_completion_safety_stream_factory,
     register_prompt_safety_handler,
 )
 from opentelemetry.instrumentation.litellm import (
@@ -20,6 +21,7 @@ from opentelemetry.instrumentation.litellm import (
     _WRAPPED_METHODS,
     _invoke_acompletion,
     _invoke_completion,
+    _set_request_attributes,
 )
 from opentelemetry.instrumentation.litellm.safety import (
     apply_completion_safety,
@@ -28,6 +30,14 @@ from opentelemetry.instrumentation.litellm.safety import (
     extract_text_content,
     _get_messages,
     _resolve_masked_text,
+)
+from opentelemetry.instrumentation.litellm.streaming_safety import (
+    _accumulate_streaming_chunk,
+    _mask_streaming_chunk,
+    is_async_streaming_response,
+    is_sync_streaming_response,
+    wrap_async_streaming_response,
+    wrap_sync_streaming_response,
 )
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -40,7 +50,7 @@ from opentelemetry.semconv_ai import (
     SpanAttributes,
 )
 
-pytestmark = pytest.mark.safety
+pytestmark = pytest.mark.fr
 
 
 def setup_function():
@@ -308,14 +318,116 @@ async def test_sync_wrapper_handles_awaitable_response():
     assert spans[0].attributes[f"{SpanAttributes.LLM_COMPLETIONS}.0.content"] == "[SECRET.token]"
 
 
-def test_streaming_completion_is_passthrough():
+def test_streaming_completion_masks_prompt_and_stream_chunks():
     exporter, tracer = _test_tracer()
-    sentinel = SimpleNamespace(value="stream")
-    calls = []
+    register_prompt_safety_handler(
+        lambda context: _prompt_result("[PII.email]", context)
+        if context.location == SafetyLocation.PROMPT and context.text == "secret"
+        else None
+    )
+    register_completion_safety_stream_factory(
+        lambda _: _FakeStreamSession(["masked-a"], flush_result="tail")
+    )
 
     def wrapped(*args, **kwargs):
-        calls.append(kwargs)
-        return sentinel
+        assert kwargs["messages"][0]["content"] == "[PII.email]"
+
+        def _stream():
+            yield SimpleNamespace(
+                model="gpt-4o-mini",
+                choices=[
+                    SimpleNamespace(
+                        finish_reason=None,
+                        message=SimpleNamespace(role="assistant", content="secret"),
+                    )
+                ],
+            )
+            yield SimpleNamespace(
+                model="gpt-4o-mini",
+                choices=[
+                    SimpleNamespace(
+                        finish_reason="stop",
+                        message=SimpleNamespace(role="assistant", content=None),
+                    )
+                ],
+            )
+
+        return _stream()
+
+    response = list(
+        _invoke_completion(
+            tracer,
+            wrapped,
+            (),
+            {
+                "model": "gpt-4o-mini",
+                "messages": [{"role": "user", "content": "secret"}],
+                "stream": True,
+            },
+        )
+    )
+
+    assert response[0].choices[0].message.content == "masked-a"
+    assert response[1].choices[0].message.content == "tail"
+    span = exporter.get_finished_spans()[0]
+    assert span.attributes[f"{SpanAttributes.LLM_PROMPTS}.0.content"] == "[PII.email]"
+    assert span.attributes[f"{SpanAttributes.LLM_COMPLETIONS}.0.content"] == "masked-atail"
+
+
+class _FakeStreamSession:
+    def __init__(self, process_results, flush_result=""):
+        self._process_results = list(process_results)
+        self._flush_result = flush_result
+
+    def process_chunk(self, text):
+        return SafetyResult(text=self._process_results.pop(0), overall_action="allow", findings=[])
+
+    def flush(self):
+        return SafetyResult(text=self._flush_result, overall_action="allow", findings=[])
+
+
+def test_streaming_text_completion_masks_chunks():
+    exporter, tracer = _test_tracer()
+    register_completion_safety_stream_factory(
+        lambda _: _FakeStreamSession(["masked-a"], flush_result="tail")
+    )
+
+    def wrapped(*args, **kwargs):
+        def _stream():
+            yield SimpleNamespace(
+                model="gpt-3.5-turbo-instruct",
+                choices=[SimpleNamespace(text="secret", finish_reason=None)],
+            )
+            yield SimpleNamespace(
+                model="gpt-3.5-turbo-instruct",
+                choices=[SimpleNamespace(finish_reason="stop")],
+            )
+
+        return _stream()
+
+    response = list(
+        _invoke_completion(
+            tracer,
+            wrapped,
+            ("secret",),
+            {"model": "gpt-3.5-turbo-instruct", "stream": True},
+            is_text_completion=True,
+        )
+    )
+
+    assert response[0].choices[0].text == "masked-a"
+    assert response[1].choices[0].text == "tail"
+    assert exporter.get_finished_spans()[0].attributes[f"{SpanAttributes.LLM_COMPLETIONS}.0.content"] == "masked-atail"
+
+
+def test_streaming_completion_is_not_skipped():
+    exporter, tracer = _test_tracer()
+
+    def wrapped(*args, **kwargs):
+        def _stream():
+            if False:
+                yield None
+        return _stream()
 
     response = _invoke_completion(
         tracer,
@@ -323,14 +435,12 @@ def test_streaming_completion_is_passthrough():
         (),
         {
             "model": "gpt-4o-mini",
-            "messages": [{"role": "user", "content": "secret"}],
             "stream": True,
         },
     )
 
-    assert response is sentinel
-    assert calls[0]["messages"][0]["content"] == "secret"
-    assert not exporter.get_finished_spans()
+    assert list(response) == []
+    assert exporter.get_finished_spans()
 
 
 def test_instrumentor_wraps_and_unwraps_all_methods():
@@ -386,7 +496,7 @@ async def test_async_skip_and_error_paths():
         {"model": "gpt-4o-mini", "stream": True},
     )
     assert response is sentinel
-    assert not exporter.get_finished_spans()
+    assert exporter.get_finished_spans()
 
     async def raising(*args, **kwargs):
         raise RuntimeError("async boom")
@@ -399,7 +509,7 @@ async def test_async_skip_and_error_paths():
             {"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "secret"}]},
         )
 
-    error_span = exporter.get_finished_spans()[0]
+    error_span = exporter.get_finished_spans()[-1]
     assert error_span.status.status_code.name == "ERROR"
 
 
@@ -479,3 +589,350 @@ def test_safety_helpers_cover_args_blocks_and_text_extraction():
         "same",
         False,
     )
+
+
+def test_streaming_helper_units_cover_text_mirroring_usage_and_detector_helpers():
+    class _FakeStreamGroup:
+        def process(self, key, text, **kwargs):
+            return "masked"
+
+        def flush(self, key):
+            return "tail"
+
+    chunk = SimpleNamespace(
+        model="gpt-4o-mini",
+        usage={"total_tokens": 3},
+        choices=[
+            SimpleNamespace(
+                finish_reason="stop",
+                message=SimpleNamespace(role="assistant", content="secret"),
+                text="secret",
+            )
+        ],
+    )
+    complete_response = {"choices": [], "model": None, "usage": None}
+
+    _mask_streaming_chunk(_FakeStreamGroup(), chunk)
+    _accumulate_streaming_chunk(complete_response, chunk)
+
+    assert chunk.choices[0].message.content == "maskedtail"
+    assert chunk.choices[0].text == "maskedtail"
+    assert complete_response["usage"] == {"total_tokens": 3}
+    assert is_sync_streaming_response({"stream": True}, (item for item in ())) is True
+    assert is_sync_streaming_response({}, (item for item in ())) is False
+
+    async def _agen():
+        yield chunk
+
+    assert is_async_streaming_response({"stream": True}, _agen()) is True
+    assert is_async_streaming_response({}, _agen()) is False
+
+
+def test_set_request_attributes_does_not_treat_text_prompt_as_model():
+    exporter, tracer = _test_tracer()
+    span = tracer.start_span("litellm.text_completion")
+    _set_request_attributes(span, ("secret",), {}, True)
+    span.end()
+
+    assert (
+        GenAIAttributes.GEN_AI_REQUEST_MODEL
+        not in exporter.get_finished_spans()[0].attributes
+    )
+
+
+def test_sync_streaming_wrapper_records_error_and_re_raises():
+    _, tracer = _test_tracer()
+    span = tracer.start_span("litellm.completion")
+
+    def _response():
+        yield SimpleNamespace(choices=[])
+        raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError, match="boom"):
+        list(
+            wrap_sync_streaming_response(
+                span,
+                _response(),
+                "chat",
+                "litellm.completion",
+                lambda *_: None,
+            )
+        )
+
+    assert span.status.status_code.name == "ERROR"
+
+
+def test_sync_streaming_wrapper_closes_underlying_response_on_error():
+    _, tracer = _test_tracer()
+    span = tracer.start_span("litellm.completion")
+
+    class _ClosingResponse:
+        def __init__(self):
+            self._chunks = iter([SimpleNamespace(choices=[]), RuntimeError("boom")])
+            self.closed = False
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            item = next(self._chunks)
+            if isinstance(item, Exception):
+                raise item
+            return item
+
+        def close(self):
+            self.closed = True
+
+    response = _ClosingResponse()
+
+    with pytest.raises(RuntimeError, match="boom"):
+        list(
+            wrap_sync_streaming_response(
+                span,
+                response,
+                "chat",
+                "litellm.completion",
+                lambda *_: None,
+            )
+        )
+
+    assert response.closed is True
+
+
+@pytest.mark.asyncio
+async def test_async_streaming_wrapper_finalizes_span():
+    _, tracer = _test_tracer()
+    span = tracer.start_span("litellm.completion")
+    responses = []
+
+    async def _response():
+        yield SimpleNamespace(
+            model="gpt-4o-mini",
+            usage={"total_tokens": 3},
+            choices=[
+                SimpleNamespace(
+                    finish_reason="stop",
+                    message=SimpleNamespace(role="assistant", content="secret"),
+                    text="secret",
+                )
+            ],
+        )
+
+    yielded = [
+        chunk
+        async for chunk in wrap_async_streaming_response(
+            span,
+            _response(),
+            "chat",
+            "litellm.completion",
+            lambda _span, response: responses.append(response),
+        )
+    ]
+
+    assert yielded[0].choices[0].message.content == "secret"
+    assert responses[0].usage == {"total_tokens": 3}
+
+
+@pytest.mark.asyncio
+async def test_async_streaming_wrapper_closes_underlying_response_on_error():
+    _, tracer = _test_tracer()
+    span = tracer.start_span("litellm.completion")
+
+    class _ClosingAsyncResponse:
+        def __init__(self):
+            self._chunks = iter([SimpleNamespace(choices=[]), RuntimeError("boom")])
+            self.closed = False
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            item = next(self._chunks)
+            if isinstance(item, Exception):
+                raise item
+            return item
+
+        async def aclose(self):
+            self.closed = True
+
+    response = _ClosingAsyncResponse()
+
+    with pytest.raises(RuntimeError, match="boom"):
+        async for _ in wrap_async_streaming_response(
+            span,
+            response,
+            "chat",
+            "litellm.completion",
+            lambda *_: None,
+        ):
+            pass
+
+    assert response.closed is True
+
+
+# ---------------------------------------------------------------------------
+# MF-7: Span leak on GeneratorExit in streaming wrappers
+# ---------------------------------------------------------------------------
+
+
+def test_sync_streaming_span_ends_on_generator_exit():
+    """Span must end even when the consumer stops iterating (GeneratorExit)."""
+    exporter, tracer = _test_tracer()
+    span = tracer.start_span("litellm.completion")
+
+    def _response():
+        yield SimpleNamespace(
+            model="gpt-4o-mini",
+            choices=[
+                SimpleNamespace(
+                    finish_reason=None,
+                    message=SimpleNamespace(role="assistant", content="hi"),
+                )
+            ],
+        )
+        yield SimpleNamespace(
+            model="gpt-4o-mini",
+            choices=[
+                SimpleNamespace(
+                    finish_reason="stop",
+                    message=SimpleNamespace(role="assistant", content=None),
+                )
+            ],
+        )
+
+    gen = wrap_sync_streaming_response(
+        span,
+        _response(),
+        "chat",
+        "litellm.completion",
+        lambda *_: None,
+    )
+    # Consume only the first chunk, then close (triggers GeneratorExit).
+    next(gen)
+    gen.close()
+
+    finished = exporter.get_finished_spans()
+    assert len(finished) == 1, "span should be ended after GeneratorExit"
+
+
+@pytest.mark.asyncio
+async def test_async_streaming_span_ends_on_generator_exit():
+    """Async span must end even when the consumer stops iterating."""
+    exporter, tracer = _test_tracer()
+    span = tracer.start_span("litellm.completion")
+
+    async def _response():
+        yield SimpleNamespace(
+            model="gpt-4o-mini",
+            choices=[
+                SimpleNamespace(
+                    finish_reason=None,
+                    message=SimpleNamespace(role="assistant", content="hi"),
+                )
+            ],
+        )
+        yield SimpleNamespace(
+            model="gpt-4o-mini",
+            choices=[
+                SimpleNamespace(
+                    finish_reason="stop",
+                    message=SimpleNamespace(role="assistant", content=None),
+                )
+            ],
+        )
+
+    agen = wrap_async_streaming_response(
+        span,
+        _response(),
+        "chat",
+        "litellm.completion",
+        lambda *_: None,
+    )
+    # Consume only the first chunk, then close (triggers GeneratorExit).
+    await agen.__anext__()
+    await agen.aclose()
+
+    finished = exporter.get_finished_spans()
+    assert len(finished) == 1, "span should be ended after async GeneratorExit"
+
+
+# ---------------------------------------------------------------------------
+# MF-8: apply_prompt_safety fails open on exception
+# ---------------------------------------------------------------------------
+
+
+def test_apply_prompt_safety_fails_open_on_exception():
+    """If safety handler raises, apply_prompt_safety returns original args/kwargs."""
+    def _exploding_handler(context):
+        raise RuntimeError("handler exploded")
+
+    register_prompt_safety_handler(_exploding_handler)
+
+    args = ()
+    kwargs = {"messages": [{"role": "user", "content": "hello"}]}
+
+    result_args, result_kwargs = apply_prompt_safety(
+        None, args, kwargs, "chat", "litellm.completion"
+    )
+
+    assert result_args is args
+    assert result_kwargs is kwargs
+
+
+# ---------------------------------------------------------------------------
+# MF-9: is_sync/async_streaming_response uses stream kwarg
+# ---------------------------------------------------------------------------
+
+
+def test_is_sync_streaming_response_detects_custom_iterators():
+    """Custom iterator classes are detected when stream=True."""
+    class CustomStreamWrapper:
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            raise StopIteration
+
+    assert is_sync_streaming_response({"stream": True}, CustomStreamWrapper()) is True
+    assert is_sync_streaming_response({}, CustomStreamWrapper()) is False
+    assert is_sync_streaming_response({"stream": False}, CustomStreamWrapper()) is False
+
+
+def test_is_async_streaming_response_detects_coroutines():
+    """Coroutines and async generators are detected when stream=True."""
+    async def _coro():
+        pass
+
+    coro = _coro()
+    assert is_async_streaming_response({"stream": True}, coro) is True
+    assert is_async_streaming_response({}, coro) is False
+    # Cleanup the coroutine to avoid warnings
+    coro.close()
+
+    async def _agen():
+        yield 1
+
+    ag = _agen()
+    assert is_async_streaming_response({"stream": True}, ag) is True
+    assert is_async_streaming_response({}, ag) is False
+    # Cleanup
+    import asyncio
+    asyncio.get_event_loop().run_until_complete(ag.aclose())
+
+
+def test_is_sync_streaming_response_rejects_async_types():
+    """Async generators and coroutines should not be sync streaming."""
+    async def _agen():
+        yield 1
+
+    ag = _agen()
+    assert is_sync_streaming_response({"stream": True}, ag) is False
+    import asyncio
+    asyncio.get_event_loop().run_until_complete(ag.aclose())
+
+    async def _coro():
+        pass
+
+    coro = _coro()
+    assert is_sync_streaming_response({"stream": True}, coro) is False
+    coro.close()
