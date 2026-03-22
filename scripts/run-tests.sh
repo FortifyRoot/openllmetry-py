@@ -117,6 +117,8 @@ bootstrap_venv() {
 
   log "Bootstrapping shared virtualenv"
   python -m pip install --upgrade pip setuptools wheel >/dev/null
+  # tomli is the backport of tomllib for Python < 3.11
+  python -m pip install tomli >/dev/null 2>&1 || true
 }
 
 discover_packages() {
@@ -197,7 +199,10 @@ python_meta() {
 import json
 import pathlib
 import sys
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
 
 package_dir = pathlib.Path(sys.argv[1]).resolve()
 key = sys.argv[2]
