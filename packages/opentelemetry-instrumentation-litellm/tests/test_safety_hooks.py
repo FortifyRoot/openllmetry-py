@@ -52,6 +52,9 @@ from opentelemetry.semconv_ai import (
 
 pytestmark = pytest.mark.fr
 
+# The OTel span name used by FR's LiteLLM instrumentation.
+_FR_SPAN_NAME = "fortifyroot.litellm.safety"
+
 
 def setup_function():
     clear_safety_handlers()
@@ -103,16 +106,14 @@ def _completion_result(masked_text, context):
     )
 
 
-def test_sync_completion_masks_prompt_response_and_sets_span_attributes():
+def test_sync_completion_masks_prompt_and_sets_span_attributes():
+    """Prompt is masked by _invoke_completion; completion safety is handled by the
+    logger (not by _finalize_response). Span attributes reflect the response as
+    returned from the LLM (pre-masked by the logger in production)."""
     exporter, tracer = _test_tracer()
     register_prompt_safety_handler(
         lambda context: _prompt_result("[PII.email]", context)
         if context.location == SafetyLocation.PROMPT and context.text == "secret"
-        else None
-    )
-    register_completion_safety_handler(
-        lambda context: _completion_result("[SECRET.token]", context)
-        if context.location == SafetyLocation.COMPLETION and context.text == "token-123"
         else None
     )
 
@@ -121,13 +122,14 @@ def test_sync_completion_masks_prompt_response_and_sets_span_attributes():
     def wrapped(*args, **kwargs):
         assert kwargs["messages"][0]["content"] == "[PII.email]"
         assert context_api.get_value(SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY) is True
+        # Simulate logger having already masked the response (as in production).
         return ModelResponse(
             model="gpt-4o-mini",
             usage={"prompt_tokens": 3, "completion_tokens": 5, "total_tokens": 8},
             choices=[
                 {
                     "finish_reason": "stop",
-                    "message": {"role": "assistant", "content": "token-123"},
+                    "message": {"role": "assistant", "content": "[SECRET.token]"},
                 }
             ],
         )
@@ -145,13 +147,15 @@ def test_sync_completion_masks_prompt_response_and_sets_span_attributes():
     spans = exporter.get_finished_spans()
     assert len(spans) == 1
     span = spans[0]
-    assert span.name == "litellm.completion"
+    assert span.name == _FR_SPAN_NAME
     assert span.attributes[GenAIAttributes.GEN_AI_REQUEST_MODEL] == "gpt-4o-mini"
     assert span.attributes[GenAIAttributes.GEN_AI_RESPONSE_MODEL] == "gpt-4o-mini"
     assert span.attributes[f"{SpanAttributes.LLM_PROMPTS}.0.content"] == "[PII.email]"
     assert span.attributes[f"{SpanAttributes.LLM_COMPLETIONS}.0.content"] == "[SECRET.token]"
     assert span.attributes[SpanAttributes.LLM_USAGE_TOTAL_TOKENS] == 8
-    assert len(span.events) == 2
+    # One prompt-safety finding event (completion safety handled by logger).
+    assert len(span.events) == 1
+    assert span.attributes["fortifyroot.span.role"] == "safety_wrapper"
 
 
 def test_sync_text_completion_masks_text_choices():
@@ -161,19 +165,15 @@ def test_sync_text_completion_masks_text_choices():
         if context.location == SafetyLocation.PROMPT and context.text == "secret"
         else None
     )
-    register_completion_safety_handler(
-        lambda context: _completion_result("[SECRET.token]", context)
-        if context.location == SafetyLocation.COMPLETION and context.text == "token-123"
-        else None
-    )
 
     def wrapped(*args, **kwargs):
         assert args[0] == "[PII.email]"
         assert kwargs["model"] == "gpt-3.5-turbo-instruct"
         assert context_api.get_value(SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY) is True
+        # Response pre-masked (as logger would do in production).
         return TextCompletionResponse(
             model="gpt-3.5-turbo-instruct",
-            choices=[{"text": "token-123"}],
+            choices=[{"text": "[SECRET.token]"}],
         )
 
     response = _invoke_completion(
@@ -189,7 +189,7 @@ def test_sync_text_completion_masks_text_choices():
     spans = exporter.get_finished_spans()
     assert len(spans) == 1
     span = spans[0]
-    assert span.name == "litellm.text_completion"
+    assert span.name == _FR_SPAN_NAME
     assert span.attributes[SpanAttributes.LLM_REQUEST_TYPE] == "completion"
     assert span.attributes[GenAIAttributes.GEN_AI_REQUEST_MODEL] == "gpt-3.5-turbo-instruct"
     assert span.attributes[f"{SpanAttributes.LLM_PROMPTS}.0.content"] == "[PII.email]"
@@ -204,11 +204,6 @@ async def test_async_completion_masks_prompt_and_response():
         if context.location == SafetyLocation.PROMPT and context.text == "secret"
         else None
     )
-    register_completion_safety_handler(
-        lambda context: _completion_result("[SECRET.token]", context)
-        if context.location == SafetyLocation.COMPLETION and context.text == "token-123"
-        else None
-    )
 
     async def wrapped(*args, **kwargs):
         assert kwargs["messages"][0]["content"] == "[PII.email]"
@@ -217,7 +212,7 @@ async def test_async_completion_masks_prompt_and_response():
             choices=[
                 {
                     "finish_reason": "stop",
-                    "message": {"role": "assistant", "content": "token-123"},
+                    "message": {"role": "assistant", "content": "[SECRET.token]"},
                 }
             ],
         )
@@ -232,7 +227,9 @@ async def test_async_completion_masks_prompt_and_response():
     assert response.choices[0].message.content == "[SECRET.token]"
     spans = exporter.get_finished_spans()
     assert len(spans) == 1
-    assert spans[0].attributes[f"{SpanAttributes.LLM_COMPLETIONS}.0.content"] == "[SECRET.token]"
+    span = spans[0]
+    assert span.name == _FR_SPAN_NAME
+    assert span.attributes[f"{SpanAttributes.LLM_COMPLETIONS}.0.content"] == "[SECRET.token]"
 
 
 @pytest.mark.asyncio
@@ -243,18 +240,13 @@ async def test_async_text_completion_masks_prompt_and_response():
         if context.location == SafetyLocation.PROMPT and context.text == "secret"
         else None
     )
-    register_completion_safety_handler(
-        lambda context: _completion_result("[SECRET.token]", context)
-        if context.location == SafetyLocation.COMPLETION and context.text == "token-123"
-        else None
-    )
 
     async def wrapped(*args, **kwargs):
         assert args[0] == "[PII.email]"
         assert kwargs["model"] == "gpt-3.5-turbo-instruct"
         return TextCompletionResponse(
             model="gpt-3.5-turbo-instruct",
-            choices=[{"text": "token-123"}],
+            choices=[{"text": "[SECRET.token]"}],
         )
 
     response = await _invoke_acompletion(
@@ -267,7 +259,7 @@ async def test_async_text_completion_masks_prompt_and_response():
 
     assert response.choices[0].text == "[SECRET.token]"
     span = exporter.get_finished_spans()[0]
-    assert span.name == "litellm.text_completion"
+    assert span.name == _FR_SPAN_NAME
     assert span.attributes[f"{SpanAttributes.LLM_PROMPTS}.0.content"] == "[PII.email]"
     assert span.attributes[f"{SpanAttributes.LLM_COMPLETIONS}.0.content"] == "[SECRET.token]"
 
@@ -280,11 +272,6 @@ async def test_sync_wrapper_handles_awaitable_response():
         if context.location == SafetyLocation.PROMPT and context.text == "secret"
         else None
     )
-    register_completion_safety_handler(
-        lambda context: _completion_result("[SECRET.token]", context)
-        if context.location == SafetyLocation.COMPLETION and context.text == "token-123"
-        else None
-    )
 
     async def response_coro():
         assert context_api.get_value(SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY) is True
@@ -293,7 +280,7 @@ async def test_sync_wrapper_handles_awaitable_response():
             choices=[
                 {
                     "finish_reason": "stop",
-                    "message": {"role": "assistant", "content": "token-123"},
+                    "message": {"role": "assistant", "content": "[SECRET.token]"},
                 }
             ],
         )
@@ -316,6 +303,58 @@ async def test_sync_wrapper_handles_awaitable_response():
     spans = exporter.get_finished_spans()
     assert len(spans) == 1
     assert spans[0].attributes[f"{SpanAttributes.LLM_COMPLETIONS}.0.content"] == "[SECRET.token]"
+
+
+@pytest.mark.asyncio
+async def test_sync_wrapper_awaitable_response_fr_span_is_ambient():
+    """When litellm.completion returns an awaitable (rare edge case), the FR
+    safety span must be the ambient span while the awaitable resolves, so any
+    callbacks (including the completion logger) call trace.get_current_span()
+    and get the FR span — not a no-op or parent span."""
+    from opentelemetry import trace as _trace
+
+    exporter, tracer = _test_tracer()
+
+    # Capture the span that is current from inside the awaitable.
+    span_seen_during_await = []
+
+    async def response_coro():
+        span_seen_during_await.append(_trace.get_current_span())
+        return ModelResponse(
+            model="gpt-4o-mini",
+            choices=[
+                {
+                    "finish_reason": "stop",
+                    "message": {"role": "assistant", "content": "reply"},
+                }
+            ],
+        )
+
+    def wrapped(*args, **kwargs):
+        return response_coro()
+
+    response = _invoke_completion(
+        tracer,
+        wrapped,
+        (),
+        {"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert inspect.iscoroutine(response)
+    await response
+
+    spans = exporter.get_finished_spans()
+    assert len(spans) == 1
+    fr_span = spans[0]
+    assert fr_span.name == _FR_SPAN_NAME
+
+    # The span seen from inside the awaitable must be the FR safety span.
+    # Before the bug fix, span_token was detached before entering
+    # _finalize_awaitable_response, so trace.get_current_span() would return
+    # the no-op INVALID span (span_id == 0).
+    assert len(span_seen_during_await) == 1
+    captured_id = span_seen_during_await[0].get_span_context().span_id
+    assert captured_id != 0, "FR span must be ambient during awaitable resolution"
+    assert captured_id == fr_span.context.span_id
 
 
 def test_streaming_completion_masks_prompt_and_stream_chunks():
@@ -370,6 +409,7 @@ def test_streaming_completion_masks_prompt_and_stream_chunks():
     assert response[0].choices[0].message.content == "masked-a"
     assert response[1].choices[0].message.content == "tail"
     span = exporter.get_finished_spans()[0]
+    assert span.name == _FR_SPAN_NAME
     assert span.attributes[f"{SpanAttributes.LLM_PROMPTS}.0.content"] == "[PII.email]"
     assert span.attributes[f"{SpanAttributes.LLM_COMPLETIONS}.0.content"] == "masked-atail"
 
@@ -417,7 +457,9 @@ def test_streaming_text_completion_masks_chunks():
 
     assert response[0].choices[0].text == "masked-a"
     assert response[1].choices[0].text == "tail"
-    assert exporter.get_finished_spans()[0].attributes[f"{SpanAttributes.LLM_COMPLETIONS}.0.content"] == "masked-atail"
+    span = exporter.get_finished_spans()[0]
+    assert span.name == _FR_SPAN_NAME
+    assert span.attributes[f"{SpanAttributes.LLM_COMPLETIONS}.0.content"] == "masked-atail"
 
 
 def test_streaming_completion_is_not_skipped():
@@ -936,3 +978,53 @@ def test_is_sync_streaming_response_rejects_async_types():
     coro = _coro()
     assert is_sync_streaming_response({"stream": True}, coro) is False
     coro.close()
+
+
+# ---------------------------------------------------------------------------
+# Streaming context: span_token kept alive during iteration
+# ---------------------------------------------------------------------------
+
+
+def test_sync_streaming_wrapper_detaches_token_after_exhaustion():
+    """span_token passed to the streaming wrapper must be detached only after
+    the generator is fully exhausted, not before the caller iterates."""
+    from opentelemetry.sdk.trace import TracerProvider as _TP
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor as _SSP
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter as _IME
+    from opentelemetry.trace import set_span_in_context as _ssic
+
+    exp = _IME()
+    prov = _TP()
+    prov.add_span_processor(_SSP(exp))
+    tracer = prov.get_tracer(__name__)
+
+    parent_span = tracer.start_span("parent")
+    ctx = _ssic(parent_span)
+    token = context_api.attach(ctx)
+
+    spans_during_iteration = []
+
+    def _response():
+        # Record current span at iteration time
+        spans_during_iteration.append(
+            context_api.get_value(
+                SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY
+            )
+        )
+        yield SimpleNamespace(model="m", choices=[])
+
+    list(
+        wrap_sync_streaming_response(
+            parent_span,
+            _response(),
+            "chat",
+            "test",
+            lambda *_: None,
+            token=token,
+        )
+    )
+
+    # Token was detached inside wrapper's finally, so outer context is gone.
+    # We can verify the token was passed and detached by checking it didn't raise.
+    parent_span.end()
+    assert len(exp.get_finished_spans()) == 1

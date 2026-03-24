@@ -6,6 +6,7 @@ import logging
 from typing import Collection
 
 from opentelemetry import context as context_api
+from opentelemetry import trace
 from opentelemetry.instrumentation.fortifyroot import get_object_value
 from opentelemetry.instrumentation.instrumentor import BaseInstrumentor
 from opentelemetry.instrumentation.litellm.safety import (
@@ -30,12 +31,17 @@ from opentelemetry.semconv_ai import (
     SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY,
     SpanAttributes,
 )
-from opentelemetry.trace import SpanKind, Status, StatusCode, get_tracer, use_span
+from opentelemetry.trace import SpanKind, Status, StatusCode, get_tracer, set_span_in_context
 from wrapt import wrap_function_wrapper
 
 logger = logging.getLogger(__name__)
 
 _instruments = ("litellm >= 1.71.2, < 2",)
+
+# FR safety wrapper span name and role attribute
+_FR_SAFETY_SPAN_NAME = "fortifyroot.litellm.safety"
+_FR_SPAN_ROLE_KEY = "fortifyroot.span.role"
+_FR_SPAN_ROLE_VALUE = "safety_wrapper"
 
 _WRAPPED_METHODS = [
     ("litellm", "completion", False, False),
@@ -49,6 +55,51 @@ _WRAPPED_METHODS = [
 ]
 
 
+class _FortifyRootCompletionLogger:
+    """LiteLLM duck-typed CustomLogger that masks completions before native OTel fires.
+
+    Registered at litellm.callbacks[0] so it fires before LiteLLM's own OTel
+    callback. Masks ``response_obj`` in-place for non-streaming calls only;
+    streaming safety is applied per-chunk by streaming_safety.py.
+
+    The FR safety span is current (via span_token) when this fires, so
+    ``trace.get_current_span()`` returns FR's parent span for finding emission.
+    """
+
+    def log_success_event(self, kwargs, response_obj, start_time, end_time):
+        # Streaming: per-chunk safety handled in streaming_safety.py; skip here.
+        if kwargs.get("stream"):
+            return
+        is_tc = bool(kwargs.get("text_completion"))
+        span_name = _span_name(kwargs, is_tc)
+        request_type = _request_type(kwargs, is_tc)
+        span = trace.get_current_span()
+        try:
+            apply_completion_safety(span, response_obj, request_type, span_name)
+        except Exception:
+            pass
+
+    async def async_log_success_event(self, kwargs, response_obj, start_time, end_time):
+        if kwargs.get("stream"):
+            return
+        is_tc = bool(kwargs.get("text_completion"))
+        span_name = _span_name(kwargs, is_tc)
+        request_type = _request_type(kwargs, is_tc)
+        span = trace.get_current_span()
+        try:
+            await asyncio.to_thread(
+                apply_completion_safety, span, response_obj, request_type, span_name
+            )
+        except Exception:
+            pass
+
+    def log_failure_event(self, kwargs, response_obj, start_time, end_time):
+        pass
+
+    async def async_log_failure_event(self, kwargs, response_obj, start_time, end_time):
+        pass
+
+
 class LiteLLMInstrumentor(BaseInstrumentor):
     def instrumentation_dependencies(self) -> Collection[str]:
         return _instruments
@@ -56,6 +107,18 @@ class LiteLLMInstrumentor(BaseInstrumentor):
     def _instrument(self, **kwargs):
         tracer_provider = kwargs.get("tracer_provider")
         tracer = get_tracer(__name__, __version__, tracer_provider)
+
+        # Register FR's completion logger at position 0 so it fires before
+        # LiteLLM's native OTel callback and masks response_obj in-place.
+        try:
+            import litellm
+            if not isinstance(getattr(litellm, "callbacks", None), list):
+                litellm.callbacks = []
+            self._fr_logger = _FortifyRootCompletionLogger()
+            litellm.callbacks.insert(0, self._fr_logger)
+        except Exception:
+            logger.debug("Failed to register _FortifyRootCompletionLogger")
+            self._fr_logger = None
 
         for module_name, func_name, is_async, is_text_completion in _WRAPPED_METHODS:
             wrapper = (
@@ -66,6 +129,17 @@ class LiteLLMInstrumentor(BaseInstrumentor):
             wrap_function_wrapper(module_name, func_name, wrapper)
 
     def _uninstrument(self, **kwargs):
+        # Remove FR's logger from litellm.callbacks
+        fr_logger = getattr(self, "_fr_logger", None)
+        if fr_logger is not None:
+            try:
+                import litellm
+                if isinstance(getattr(litellm, "callbacks", None), list):
+                    litellm.callbacks.remove(fr_logger)
+            except Exception:
+                pass
+            self._fr_logger = None
+
         for module_name, func_name, _, _ in _WRAPPED_METHODS:
             try:
                 unwrap(module_name, func_name)
@@ -105,61 +179,56 @@ def _invoke_completion(tracer, wrapped, args, kwargs, *, is_text_completion=Fals
 
     span_name = _span_name(kwargs, is_text_completion)
     request_type = _request_type(kwargs, is_text_completion)
-    attributes = {
-        GenAIAttributes.GEN_AI_SYSTEM: "litellm",
-        SpanAttributes.LLM_REQUEST_TYPE: request_type,
-        SpanAttributes.LLM_IS_STREAMING: bool(kwargs.get("stream")),
-    }
 
     span = tracer.start_span(
-        span_name,
+        _FR_SAFETY_SPAN_NAME,
         kind=SpanKind.CLIENT,
-        attributes=attributes,
+        attributes={
+            GenAIAttributes.GEN_AI_SYSTEM: "litellm",
+            SpanAttributes.LLM_REQUEST_TYPE: request_type,
+            SpanAttributes.LLM_IS_STREAMING: bool(kwargs.get("stream")),
+            _FR_SPAN_ROLE_KEY: _FR_SPAN_ROLE_VALUE,
+        },
     )
-    with use_span(span, end_on_exit=False):
-        _set_request_attributes(span, args, kwargs, is_text_completion)
+    # Attach FR span as ambient OTel context so LiteLLM's native OTel callback
+    # creates its litellm_request span as a child of this span.
+    # Also set SUPPRESS key to prevent FR re-entry via wrapt.
+    ctx = set_span_in_context(span)
+    ctx = context_api.set_value(SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY, True, ctx)
+    span_token = context_api.attach(ctx)
 
+    try:
+        _set_request_attributes(span, args, kwargs, is_text_completion)
         updated_args, updated_kwargs = apply_prompt_safety(
             span, args, kwargs, request_type, span_name
         )
-        _set_prompt_attributes(
+        _set_prompt_attributes(span, updated_args, updated_kwargs, request_type, is_text_completion)
+        response = wrapped(*updated_args, **updated_kwargs)
+    except Exception as exc:
+        context_api.detach(span_token)
+        _record_span_error(span, exc)
+        span.end()
+        raise
+
+    if inspect.isawaitable(response):
+        context_api.detach(span_token)
+        return _finalize_awaitable_response(span, response, request_type, span_name)
+
+    if is_sync_streaming_response(updated_kwargs, response):
+        # Keep span_token active during stream iteration so LiteLLM callbacks
+        # (including native OTel) fire with FR's span as the ambient context.
+        # The streaming wrapper detaches span_token in its finally block.
+        return wrap_sync_streaming_response(
             span,
-            updated_args,
-            updated_kwargs,
+            response,
             request_type,
-            is_text_completion,
+            span_name,
+            _set_response_attributes,
+            token=span_token,
         )
 
-        token = context_api.attach(
-            context_api.set_value(SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY, True)
-        )
-        try:
-            response = wrapped(*updated_args, **updated_kwargs)
-        except Exception as exc:
-            context_api.detach(token)
-            _record_span_error(span, exc)
-            span.end()
-            raise
-
-        if inspect.isawaitable(response):
-            context_api.detach(token)
-            return _finalize_awaitable_response(
-                span,
-                response,
-                request_type,
-                span_name,
-            )
-
-        context_api.detach(token)
-        if is_sync_streaming_response(updated_kwargs, response):
-            return wrap_sync_streaming_response(
-                span,
-                response,
-                request_type,
-                span_name,
-                _set_response_attributes,
-            )
-        return _finalize_response(span, response, request_type, span_name)
+    context_api.detach(span_token)
+    return _finalize_response(span, response, request_type, span_name)
 
 
 async def _invoke_acompletion(
@@ -175,53 +244,48 @@ async def _invoke_acompletion(
 
     span_name = _span_name(kwargs, is_text_completion)
     request_type = _request_type(kwargs, is_text_completion)
-    attributes = {
-        GenAIAttributes.GEN_AI_SYSTEM: "litellm",
-        SpanAttributes.LLM_REQUEST_TYPE: request_type,
-        SpanAttributes.LLM_IS_STREAMING: bool(kwargs.get("stream")),
-    }
 
     span = tracer.start_span(
-        span_name,
+        _FR_SAFETY_SPAN_NAME,
         kind=SpanKind.CLIENT,
-        attributes=attributes,
+        attributes={
+            GenAIAttributes.GEN_AI_SYSTEM: "litellm",
+            SpanAttributes.LLM_REQUEST_TYPE: request_type,
+            SpanAttributes.LLM_IS_STREAMING: bool(kwargs.get("stream")),
+            _FR_SPAN_ROLE_KEY: _FR_SPAN_ROLE_VALUE,
+        },
     )
-    with use_span(span, end_on_exit=False):
-        _set_request_attributes(span, args, kwargs, is_text_completion)
+    ctx = set_span_in_context(span)
+    ctx = context_api.set_value(SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY, True, ctx)
+    span_token = context_api.attach(ctx)
 
+    try:
+        _set_request_attributes(span, args, kwargs, is_text_completion)
         updated_args, updated_kwargs = await asyncio.to_thread(  # FR: async safety
             apply_prompt_safety,
             span, args, kwargs, request_type, span_name
         )
-        _set_prompt_attributes(
+        _set_prompt_attributes(span, updated_args, updated_kwargs, request_type, is_text_completion)
+        response = await wrapped(*updated_args, **updated_kwargs)
+    except Exception as exc:
+        context_api.detach(span_token)
+        _record_span_error(span, exc)
+        span.end()
+        raise
+
+    if is_async_streaming_response(updated_kwargs, response):
+        # Keep span_token active during async stream iteration.
+        return wrap_async_streaming_response(
             span,
-            updated_args,
-            updated_kwargs,
+            response,
             request_type,
-            is_text_completion,
+            span_name,
+            _set_response_attributes,
+            token=span_token,
         )
 
-        token = context_api.attach(
-            context_api.set_value(SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY, True)
-        )
-        try:
-            response = await wrapped(*updated_args, **updated_kwargs)
-        except Exception as exc:
-            _record_span_error(span, exc)
-            span.end()
-            raise
-        finally:
-            context_api.detach(token)
-
-        if is_async_streaming_response(updated_kwargs, response):
-            return wrap_async_streaming_response(
-                span,
-                response,
-                request_type,
-                span_name,
-                _set_response_attributes,
-            )
-        return await _async_finalize_response(span, response, request_type, span_name)  # FR: async safety
+    context_api.detach(span_token)
+    return await _async_finalize_response(span, response, request_type, span_name)  # FR: async safety
 
 
 def _should_skip_instrumentation(kwargs):
@@ -350,9 +414,12 @@ async def _finalize_awaitable_response(
     request_type,
     span_name,
 ):
-    token = context_api.attach(
-        context_api.set_value(SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY, True)
-    )
+    # Re-attach FR span as ambient context AND suppress re-entry while awaiting,
+    # so LiteLLM callbacks (including the completion logger) fire with the
+    # correct span as current, enabling accurate finding emission.
+    ctx = set_span_in_context(span)
+    ctx = context_api.set_value(SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY, True, ctx)
+    token = context_api.attach(ctx)
     try:
         awaited_response = await response
     except Exception as exc:
@@ -366,9 +433,8 @@ async def _finalize_awaitable_response(
 
 
 async def _async_finalize_response(span, response, request_type, span_name):  # FR: async safety
-    """Async variant of _finalize_response that offloads safety to a thread."""  # FR: async safety
+    """Async variant of _finalize_response. Completion safety handled by logger."""  # FR: async safety
     try:  # FR: async safety
-        await asyncio.to_thread(apply_completion_safety, span, response, request_type, span_name)  # FR: async safety
         _set_response_attributes(span, response)  # FR: async safety
         span.set_status(Status(StatusCode.OK))  # FR: async safety
         return response  # FR: async safety
@@ -377,8 +443,8 @@ async def _async_finalize_response(span, response, request_type, span_name):  # 
 
 
 def _finalize_response(span, response, request_type, span_name):
+    """Finalize a non-streaming response. Completion safety handled by logger."""
     try:
-        apply_completion_safety(span, response, request_type, span_name)
         _set_response_attributes(span, response)
         span.set_status(Status(StatusCode.OK))
         return response
@@ -389,6 +455,8 @@ def _finalize_response(span, response, request_type, span_name):
 def _record_span_error(span, exc):
     span.record_exception(exc)
     span.set_status(Status(StatusCode.ERROR, str(exc)))
+
+
 __all__ = [
     "LiteLLMInstrumentor",
     "_invoke_acompletion",

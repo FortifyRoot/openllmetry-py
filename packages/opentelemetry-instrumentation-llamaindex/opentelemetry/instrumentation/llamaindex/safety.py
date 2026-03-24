@@ -36,7 +36,11 @@ except Exception:  # pragma: no cover
 PROVIDER = "LlamaIndex"
 _WRAPPERS_INSTALLED = False
 _WRAPPERS_LOCK = threading.Lock()
-_METHODS = ("chat", "achat", "complete", "acomplete")
+_METHODS = (
+    "chat", "achat", "complete", "acomplete",
+    # FR: streaming safety -- per-chunk holdback for streaming LLM calls
+    "stream_chat", "astream_chat", "stream_complete", "astream_complete",
+)
 _WRAPPED_TARGETS: set[tuple[str, str]] = set()
 logger = logging.getLogger(__name__)
 
@@ -101,11 +105,76 @@ async def llm_acomplete_wrapper(wrapped, instance, args, kwargs):
     return await wrapped(*updated_args, **updated_kwargs)
 
 
+def llm_stream_chat_wrapper(wrapped, instance, args, kwargs):  # FR: streaming safety
+    from opentelemetry.instrumentation.llamaindex.streaming_safety import (  # noqa: PLC0415
+        LlamaIndexStreamingSafety,
+        wrap_stream,
+    )
+    updated_args, updated_kwargs = _apply_chat_prompt_safety(instance, args, kwargs)
+    span = trace.get_current_span()
+    span_name = f"{instance.__class__.__name__}.stream_chat"
+    safety = LlamaIndexStreamingSafety(span, span_name, LLMRequestTypeValues.CHAT.value)
+    return wrap_stream(wrapped(*updated_args, **updated_kwargs), safety)
+
+
+async def llm_astream_chat_wrapper(wrapped, instance, args, kwargs):  # FR: streaming safety
+    import inspect as _inspect  # noqa: PLC0415
+    from opentelemetry.instrumentation.llamaindex.streaming_safety import (  # noqa: PLC0415
+        LlamaIndexStreamingSafety,
+        make_async_stream,
+    )
+    span = trace.get_current_span()  # capture eagerly before any await
+    span_name = f"{instance.__class__.__name__}.astream_chat"
+    updated_args, updated_kwargs = await asyncio.to_thread(
+        _apply_chat_prompt_safety, instance, args, kwargs
+    )
+    result = wrapped(*updated_args, **updated_kwargs)
+    if _inspect.iscoroutine(result):  # coroutine returning async gen (standard LI pattern)
+        result = await result
+    safety = LlamaIndexStreamingSafety(span, span_name, LLMRequestTypeValues.CHAT.value)
+    return make_async_stream(result, safety)
+
+
+def llm_stream_complete_wrapper(wrapped, instance, args, kwargs):  # FR: streaming safety
+    from opentelemetry.instrumentation.llamaindex.streaming_safety import (  # noqa: PLC0415
+        LlamaIndexStreamingSafety,
+        wrap_stream,
+    )
+    updated_args, updated_kwargs = _apply_completion_prompt_safety(instance, args, kwargs)
+    span = trace.get_current_span()
+    span_name = f"{instance.__class__.__name__}.stream_complete"
+    safety = LlamaIndexStreamingSafety(span, span_name, LLMRequestTypeValues.COMPLETION.value)
+    return wrap_stream(wrapped(*updated_args, **updated_kwargs), safety)
+
+
+async def llm_astream_complete_wrapper(wrapped, instance, args, kwargs):  # FR: streaming safety
+    import inspect as _inspect  # noqa: PLC0415
+    from opentelemetry.instrumentation.llamaindex.streaming_safety import (  # noqa: PLC0415
+        LlamaIndexStreamingSafety,
+        make_async_stream,
+    )
+    span = trace.get_current_span()  # capture eagerly before any await
+    span_name = f"{instance.__class__.__name__}.astream_complete"
+    updated_args, updated_kwargs = await asyncio.to_thread(
+        _apply_completion_prompt_safety, instance, args, kwargs
+    )
+    result = wrapped(*updated_args, **updated_kwargs)
+    if _inspect.iscoroutine(result):
+        result = await result
+    safety = LlamaIndexStreamingSafety(span, span_name, LLMRequestTypeValues.COMPLETION.value)
+    return make_async_stream(result, safety)
+
+
 _METHOD_WRAPPERS = {
     "chat": llm_chat_wrapper,
     "achat": llm_achat_wrapper,
     "complete": llm_complete_wrapper,
     "acomplete": llm_acomplete_wrapper,
+    # FR: streaming safety
+    "stream_chat": llm_stream_chat_wrapper,
+    "astream_chat": llm_astream_chat_wrapper,
+    "stream_complete": llm_stream_complete_wrapper,
+    "astream_complete": llm_astream_complete_wrapper,
 }
 
 
