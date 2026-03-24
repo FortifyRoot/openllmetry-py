@@ -14,6 +14,9 @@ from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
 from opentelemetry.instrumentation.logging import LoggingInstrumentor
 
 
+_FORTIFYROOT_LOGGING_HANDLER_MARKER = "_fortifyroot_logging_handler"
+
+
 class LoggerWrapper(object):
     resource_attributes: Dict[Any, Any] = {}
     endpoint: Optional[str] = None
@@ -35,7 +38,9 @@ class LoggerWrapper(object):
             obj.__logging_provider = init_logging_provider(
                 obj.__logging_exporter, LoggerWrapper.resource_attributes
             )
-            LoggingInstrumentor().instrument(set_logging_format=True)
+            instrumentor = LoggingInstrumentor()
+            if not instrumentor.is_instrumented_by_opentelemetry:
+                instrumentor.instrument(set_logging_format=True)
 
         return cls.instance
 
@@ -48,6 +53,12 @@ class LoggerWrapper(object):
         LoggerWrapper.resource_attributes = resource_attributes
         LoggerWrapper.endpoint = endpoint
         LoggerWrapper.headers = headers
+
+    @classmethod
+    def get_logging_provider(cls) -> Optional[LoggerProvider]:
+        if not hasattr(cls, "instance"):
+            return None
+        return cls.instance.__logging_provider
 
 
 def init_logging_exporter(endpoint: str, headers: Dict[str, str]) -> LogExporter:
@@ -70,6 +81,31 @@ def init_logging_provider(
     logger_provider.add_log_record_processor(BatchLogRecordProcessor(exporter))
 
     logging_handler = LoggingHandler(level=logging.NOTSET, logger_provider=logger_provider)
-    logging.basicConfig(level=logging.INFO, handlers=[logging_handler])
+    _attach_root_logging_handler(logging_handler)
 
     return logger_provider
+
+
+def is_fortifyroot_logging_handler(handler: logging.Handler) -> bool:
+    return bool(getattr(handler, _FORTIFYROOT_LOGGING_HANDLER_MARKER, False))
+
+
+def _attach_root_logging_handler(logging_handler: LoggingHandler) -> None:
+    root_logger = logging.getLogger()
+    had_non_fortifyroot_handlers = any(
+        not is_fortifyroot_logging_handler(handler) for handler in root_logger.handlers
+    )
+
+    for handler in list(root_logger.handlers):
+        if is_fortifyroot_logging_handler(handler):
+            root_logger.removeHandler(handler)
+
+    setattr(logging_handler, _FORTIFYROOT_LOGGING_HANDLER_MARKER, True)
+    root_logger.addHandler(logging_handler)
+
+    # Preserve existing app logging levels/formatters when they are already
+    # configured. If the app has not configured logging at all, keep the prior
+    # default of exporting INFO and above.
+    if not had_non_fortifyroot_handlers and root_logger.level > logging.INFO:
+        root_logger.setLevel(logging.INFO)
+
