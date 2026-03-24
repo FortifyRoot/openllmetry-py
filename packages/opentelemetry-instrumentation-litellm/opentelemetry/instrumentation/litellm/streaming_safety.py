@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 from types import SimpleNamespace
 
+from opentelemetry import context as context_api
 from opentelemetry.trace.status import Status, StatusCode
 
 from opentelemetry.instrumentation.fortifyroot import get_object_value, set_object_value
@@ -27,7 +28,14 @@ def is_async_streaming_response(kwargs, response) -> bool:
     return False
 
 
-def wrap_sync_streaming_response(span, response, request_type, span_name, set_response_attributes):
+def wrap_sync_streaming_response(span, response, request_type, span_name, set_response_attributes, token=None):
+    """Wrap a sync streaming response with per-chunk safety and span lifecycle.
+
+    ``token`` is the OTel context token established by ``_invoke_completion``
+    that keeps FR's safety span as the ambient span during stream iteration.
+    It is detached here in the ``finally`` block, after all LiteLLM callbacks
+    (including native OTel) have fired for the last chunk.
+    """
     streams = CompletionTextStreamGroup(
         span=span,
         provider=PROVIDER,
@@ -47,6 +55,8 @@ def wrap_sync_streaming_response(span, response, request_type, span_name, set_re
         _record_span_error(span, exc)
         raise
     finally:
+        if token is not None:
+            context_api.detach(token)
         if span.is_recording():
             span.end()
 
@@ -57,7 +67,13 @@ async def wrap_async_streaming_response(
     request_type,
     span_name,
     set_response_attributes,
+    token=None,
 ):
+    """Wrap an async streaming response with per-chunk safety and span lifecycle.
+
+    ``token`` is detached in the ``finally`` block after the stream is
+    exhausted, keeping FR's safety span as ambient context until that point.
+    """
     streams = CompletionTextStreamGroup(
         span=span,
         provider=PROVIDER,
@@ -77,6 +93,8 @@ async def wrap_async_streaming_response(
         _record_span_error(span, exc)
         raise
     finally:
+        if token is not None:
+            context_api.detach(token)
         if span.is_recording():
             span.end()
 

@@ -136,7 +136,10 @@ class SpanHolder:
 
     @update_span_for_event.register
     def _(self, event: LLMChatEndEvent):
-        apply_chat_end_safety(event, self.otel_span)
+        # FR: when streaming, per-chunk safety already ran and emitted findings;
+        # skip here to avoid duplicate span events on the assembled response.
+        if not self.waiting_for_streaming:
+            apply_chat_end_safety(event, self.otel_span)
         set_llm_chat_response_model_attributes(event, self.otel_span)
         if should_emit_events():
             emit_chat_response_events(event)
@@ -149,7 +152,9 @@ class SpanHolder:
 
     @update_span_for_event.register
     def _(self, event: LLMCompletionEndEvent):
-        apply_completion_end_safety(event, self.otel_span)
+        # FR: same as LLMChatEndEvent -- skip when streaming safety is active.
+        if not self.waiting_for_streaming:
+            apply_completion_end_safety(event, self.otel_span)
 
     @update_span_for_event.register
     def _(self, event: LLMPredictEndEvent):
