@@ -99,6 +99,11 @@ class TracerWrapper(object):
             obj.__tracer_provider = init_tracer_provider(
                 resource=obj.__resource, sampler=sampler
             )
+            callback_processor = (
+                _SpanPostprocessCallbackProcessor(span_postprocess_callback)
+                if span_postprocess_callback
+                else None
+            )
 
             # Handle multiple processors case
             if processor is not None and isinstance(processor, list):
@@ -118,6 +123,9 @@ class TracerWrapper(object):
 
                     obj.__tracer_provider.add_span_processor(proc)
 
+                if callback_processor is not None:
+                    obj.__tracer_provider.add_span_processor(callback_processor)
+
             # Handle single processor case (backward compatibility)
             elif processor is not None:
                 obj.__spans_processor: SpanProcessor = processor
@@ -132,26 +140,20 @@ class TracerWrapper(object):
 
                 obj.__tracer_provider.add_span_processor(obj.__spans_processor)
 
+                if callback_processor is not None:
+                    obj.__tracer_provider.add_span_processor(callback_processor)
+
             # Handle default processor case
             else:
                 obj.__spans_processor = get_default_span_processor(
                     disable_batch=disable_batch, exporter=exporter
                 )
 
-                if span_postprocess_callback:
-                    # Create a wrapper that calls both the custom and original methods
-                    original_on_end = obj.__spans_processor.on_end
-
-                    def wrapped_on_end(span):
-                        # Call the custom on_end first
-                        span_postprocess_callback(span)
-                        # Then call the original to ensure normal processing
-                        original_on_end(span)
-
-                    obj.__spans_processor.on_end = wrapped_on_end
-
                 obj.__spans_processor.on_start = obj._span_processor_on_start
                 obj.__tracer_provider.add_span_processor(obj.__spans_processor)
+
+                if callback_processor is not None:
+                    obj.__tracer_provider.add_span_processor(callback_processor)
 
             if propagator:
                 set_global_textmap(propagator)
@@ -232,6 +234,23 @@ class TracerWrapper(object):
 
     def get_tracer(self):
         return self.__tracer_provider.get_tracer(TRACER_NAME)
+
+
+class _SpanPostprocessCallbackProcessor(SpanProcessor):
+    def __init__(self, callback: Callable[[ReadableSpan], None]) -> None:
+        self._callback = callback
+
+    def on_start(self, span: Span, parent_context: Optional[Context] = None) -> None:
+        return None
+
+    def on_end(self, span: ReadableSpan) -> None:
+        self._callback(span)
+
+    def shutdown(self) -> None:
+        return None
+
+    def force_flush(self, timeout_millis: int = 30000) -> bool:
+        return True
 
 
 def set_association_properties(properties: dict) -> None:
