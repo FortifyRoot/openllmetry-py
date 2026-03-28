@@ -48,8 +48,8 @@ jobs:
           path: reports/test-run/
           if-no-files-found: ignore
 
-  all-tests:
-    name: All Tests (py${{ matrix.python-version }})
+  non-fr-tests:
+    name: Non-FR Tests (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
@@ -72,15 +72,15 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v6
 
-      - name: Run full test suite (UT + FR + VCR)
+      - name: Run non-FR test suite (upstream UT + VCR)
         env:
           HAYSTACK_TELEMETRY_ENABLED: "False"
-        run: bash ./scripts/run-tests.sh --all
+        run: bash ./scripts/run-tests.sh -- -m "not fr"
 
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: all-test-reports-py${{ matrix.python-version }}
+          name: non-fr-test-reports-py${{ matrix.python-version }}
           path: reports/test-run/
           if-no-files-found: ignore
