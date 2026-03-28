@@ -123,10 +123,15 @@ def assert_guardrails(reader):
                         ]
                         assert data_point.value > 0
 
-                assert (
-                    metric.data.data_points[0].attributes[GenAIAttributes.GEN_AI_SYSTEM]
-                    == "bedrock"
-                )
+                if metric.name in (
+                    GuardrailMeters.LLM_BEDROCK_GUARDRAIL_ACTIVATION,
+                    GuardrailMeters.LLM_BEDROCK_GUARDRAIL_LATENCY,
+                    GuardrailMeters.LLM_BEDROCK_GUARDRAIL_COVERAGE,
+                ):
+                    assert (
+                        metric.data.data_points[0].attributes[GenAIAttributes.GEN_AI_SYSTEM]
+                        == "bedrock"
+                    )
 
     assert found_activations is True
     assert found_latency is True

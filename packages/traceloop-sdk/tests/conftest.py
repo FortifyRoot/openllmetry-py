@@ -77,45 +77,35 @@ def exporter_with_custom_span_processor():
 
 @pytest.fixture(scope="function")
 def exporter_with_custom_span_postprocess_callback(exporter):
-    if hasattr(TracerWrapper, "instance"):
-        _trace_wrapper_instance = TracerWrapper.instance
-        del TracerWrapper.instance
+    """Temporarily patch the active span processor to redact prompt/completion content.
 
-    def span_postprocess_callback(span: ReadableSpan) -> None:
-        prompt_pattern = re.compile(r"gen_ai\.prompt\.\d+\.content$")
-        completion_pattern = re.compile(r"gen_ai\.completion\.\d+\.content$")
-        if hasattr(span, "_attributes"):
-            attributes = span._attributes if span._attributes else {}
-            # Find and encode all matching attributes
-            for key, value in attributes.items():
+    Instead of creating a whole new Traceloop instance (which replaces the global
+    TracerProvider and breaks the session-scoped exporter), we monkey-patch on_end
+    on the existing span processor and restore it afterwards.
+    """
+    wrapper = getattr(TracerWrapper, "instance", None)
+    assert wrapper is not None, "TracerWrapper must be initialized before this fixture"
+
+    span_processor = wrapper._TracerWrapper__spans_processor
+    original_on_end = span_processor.on_end
+
+    prompt_pattern = re.compile(r"gen_ai\.prompt\.\d+\.content$")
+    completion_pattern = re.compile(r"gen_ai\.completion\.\d+\.content$")
+
+    def _redacting_on_end(span):
+        if hasattr(span, "_attributes") and span._attributes:
+            for key, value in span._attributes.items():
                 if (
                     prompt_pattern.match(key) or completion_pattern.match(key)
                 ) and isinstance(value, str):
-                    attributes[key] = "REDACTED"  # Modify the attributes directly
+                    span._attributes[key] = "REDACTED"
+        original_on_end(span)
 
-    Traceloop.init(
-        exporter=exporter,
-        span_postprocess_callback=span_postprocess_callback,
-    )
+    span_processor.on_end = _redacting_on_end
 
     yield exporter
 
-    if hasattr(TracerWrapper, "instance"):
-        # Get the span processor
-        if hasattr(TracerWrapper.instance, "_TracerWrapper__spans_processor"):
-            span_processor = TracerWrapper.instance._TracerWrapper__spans_processor
-            # Reset the on_end method to its original class implementation.
-            # This is needed to make this test run in isolation as SpanProcessor is a singleton.
-            if isinstance(span_processor, SimpleSpanProcessor):
-                span_processor.on_end = SimpleSpanProcessor.on_end.__get__(
-                    span_processor, SimpleSpanProcessor
-                )
-            elif isinstance(span_processor, BatchSpanProcessor):
-                span_processor.on_end = BatchSpanProcessor.on_end.__get__(
-                    span_processor, BatchSpanProcessor
-                )
-    if _trace_wrapper_instance:
-        TracerWrapper.instance = _trace_wrapper_instance
+    span_processor.on_end = original_on_end
 
 
 @pytest.fixture

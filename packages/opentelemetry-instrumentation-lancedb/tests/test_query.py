@@ -7,6 +7,11 @@ db = lancedb.connect("data/sample-lancedb")
 
 @pytest.fixture
 def collection():
+    # Drop stale table from prior runs (create_table doesn't overwrite).
+    try:
+        db.drop_table("my_table")
+    except Exception:
+        pass
     data = [
         {"vector": [1.3, 1.4], "item": "fizz", "price": 100.0},
         {"vector": [9.5, 56.2], "item": "buzz", "price": 200.0},

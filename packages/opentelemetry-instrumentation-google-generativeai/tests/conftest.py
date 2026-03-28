@@ -34,16 +34,36 @@ pytest_plugins = []
 
 
 @pytest.fixture(scope="session")
-def exporter(metrics_test_context):
+def _session_instrumentor(metrics_test_context):
+    """Session-scoped instrumentor that stays active for the entire run."""
+    meter_provider, _ = metrics_test_context
+    instrumentor = GoogleGenerativeAiInstrumentor()
+    instrumentor.instrument(meter_provider=meter_provider)
+    return instrumentor
+
+
+@pytest.fixture(autouse=True)
+def _ensure_instrumented(_session_instrumentor):
+    """Re-instrument after each test.
+
+    Function-scoped fixtures (instrument_legacy, instrument_with_content, etc.)
+    call uninstrument() on teardown, which globally unwraps the monkeypatched
+    methods.  This fixture re-applies instrumentation so that later tests
+    (especially test_generate_metrics) still see metrics being emitted.
+    """
+    yield
+    if not _session_instrumentor.is_instrumented_by_opentelemetry:
+        _session_instrumentor.instrument()
+
+
+@pytest.fixture(scope="session")
+def exporter(_session_instrumentor):
     exporter = InMemorySpanExporter()
     processor = SimpleSpanProcessor(exporter)
 
     provider = TracerProvider()
     provider.add_span_processor(processor)
     set_tracer_provider(provider)
-
-    meter_provider, _ = metrics_test_context
-    GoogleGenerativeAiInstrumentor().instrument(meter_provider=meter_provider)
 
     return exporter
 

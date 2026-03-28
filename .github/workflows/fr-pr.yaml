@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
 
     steps:
       - name: Check out code
@@ -35,6 +35,9 @@ jobs:
           cache-dependency-path: |
             packages/**/pyproject.toml
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
       - name: Run FR-marked test suite
         env:
           HAYSTACK_TELEMETRY_ENABLED: "False"
@@ -45,5 +48,45 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: fr-test-reports-py${{ matrix.python-version }}
+          path: reports/test-run/
+          if-no-files-found: ignore
+
+  all-tests:
+    name: All Tests (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+          cache-dependency-path: |
+            packages/**/pyproject.toml
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Run full test suite (UT + FR + VCR)
+        env:
+          HAYSTACK_TELEMETRY_ENABLED: "False"
+        run: bash ./scripts/run-tests.sh --all
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: all-test-reports-py${{ matrix.python-version }}
           path: reports/test-run/
           if-no-files-found: ignore
