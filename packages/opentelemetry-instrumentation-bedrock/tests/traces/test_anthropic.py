@@ -498,7 +498,7 @@ def test_anthropic_3_completion_streaming_with_events_with_content(
     choice_event = {
         "index": 0,
         "finish_reason": "unknown",
-        "message": {"content": response.get("body")._accumulating_body.get("content")},
+        "message": {"content": response.get("body")._self_accumulating_body.get("content")},
     }
     assert_message_in_logs(logs[1], "gen_ai.choice", choice_event)
 

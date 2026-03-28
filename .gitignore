@@ -138,6 +138,7 @@ celerybeat.pid
 
 # Environments
 .env
+.env.test
 .venv
 env/
 venv/
@@ -175,8 +176,10 @@ cython_debug/
 # NX
 .nx
 
-# Test artifcats
+# Test artifacts
 chroma.sqlite3
+*.bin
+milvus.db
 
 # Claude
 .claude

@@ -24,6 +24,18 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
 pytestmark = pytest.mark.fr
 
 
+@pytest.fixture(autouse=True)
+def _cleanup_safety_handlers():
+    """Ensure safety handlers are cleared after each test in this file.
+
+    Tests here register global safety stream factories via
+    register_completion_safety_stream_factory().  Without cleanup, these
+    persist and corrupt subsequent tests (e.g. test_thinking.py streaming).
+    """
+    yield
+    clear_safety_handlers()
+
+
 def test_apply_prompt_safety_masks_prompt_system_and_messages(monkeypatch):
     monkeypatch.setattr(safety, "run_prompt_safety", lambda **kwargs: SafetyResult(text=f"masked:{kwargs['text']}", overall_action="MASK"))
 

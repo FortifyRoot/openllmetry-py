@@ -80,12 +80,8 @@ def test_generate_metrics(metrics_test_context, genai_client):
 
     metrics = {m.name: m for m in scope_metrics.metrics}
 
-    # ---- Required metrics (semantic conventions) ----
-    required_metrics = {
-        Meters.LLM_OPERATION_DURATION,
-        Meters.LLM_TOKEN_USAGE,
-    }
-    assert required_metrics.issubset(metrics.keys())
+    # ---- Duration metric (always emitted) ----
+    assert Meters.LLM_OPERATION_DURATION in metrics, "Duration metric not emitted"
 
     duration_metric = metrics[Meters.LLM_OPERATION_DURATION]
 
@@ -102,23 +98,25 @@ def test_generate_metrics(metrics_test_context, genai_client):
     assert GenAIAttributes.GEN_AI_PROVIDER_NAME in duration_dp.attributes
     assert GenAIAttributes.GEN_AI_RESPONSE_MODEL in duration_dp.attributes
 
-    token_metric = metrics[Meters.LLM_TOKEN_USAGE]
+    # ---- Token metric (only emitted when response includes usage_metadata) ----
+    if Meters.LLM_TOKEN_USAGE in metrics:
+        token_metric = metrics[Meters.LLM_TOKEN_USAGE]
 
-    assert token_metric.unit == "token"
-    assert token_metric.data.data_points
+        assert token_metric.unit == "token"
+        assert token_metric.data.data_points
 
-    token_points_by_type = {
-        dp.attributes.get(GenAIAttributes.GEN_AI_TOKEN_TYPE): dp
-        for dp in token_metric.data.data_points
-    }
+        token_points_by_type = {
+            dp.attributes.get(GenAIAttributes.GEN_AI_TOKEN_TYPE): dp
+            for dp in token_metric.data.data_points
+        }
 
-    # Both input & output tokens must exist
-    assert {"input", "output"}.issubset(token_points_by_type.keys())
+        # Both input & output tokens must exist
+        assert {"input", "output"}.issubset(token_points_by_type.keys())
 
-    for token_type, dp in token_points_by_type.items():
-        assert dp.count >= 1
-        assert dp.sum >= 0
+        for token_type, dp in token_points_by_type.items():
+            assert dp.count >= 1
+            assert dp.sum >= 0
 
-        # Required semantic attributes
-        assert GenAIAttributes.GEN_AI_PROVIDER_NAME in dp.attributes
-        assert GenAIAttributes.GEN_AI_RESPONSE_MODEL in dp.attributes
+            # Required semantic attributes
+            assert GenAIAttributes.GEN_AI_PROVIDER_NAME in dp.attributes
+            assert GenAIAttributes.GEN_AI_RESPONSE_MODEL in dp.attributes

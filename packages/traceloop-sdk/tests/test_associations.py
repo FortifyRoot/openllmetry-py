@@ -11,11 +11,14 @@ def client_with_exporter():
     Fixture that initializes Traceloop with API key.
     Client is only created when NO custom exporter/processor is provided.
     """
-    # Initialize with API key and Traceloop endpoint - this creates a client
+    # Initialize with API key and Traceloop endpoint - this creates a client.
+    # endpoint_is_traceloop=True is needed because FR rebranding changed the
+    # endpoint detection to look for "fortifyroot.com" instead of "traceloop.com".
     client = Traceloop.init(
         app_name="test_associations",
         api_key="test-api-key",
         api_endpoint="https://api.traceloop.com",
+        endpoint_is_traceloop=True,
         disable_batch=True,
         # NO exporter or processor - so client gets created
     )

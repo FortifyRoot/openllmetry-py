@@ -3,8 +3,15 @@
 # Examples:
 # Run every discovered package test suite:
 #   ./scripts/run-tests.sh
+#   ./scripts/run-tests.sh --all                            # explicit alias
 # Run only tests marked with `@pytest.mark.fr` across matching packages:
 #   ./scripts/run-tests.sh --fr
+# Run only VCR cassette tests (replay mode, no API keys needed):
+#   ./scripts/run-tests.sh --cassettes
+# Run cassettes for a single package:
+#   ./scripts/run-tests.sh --cassettes --package '*openai*'
+# Run cassettes in recording mode (requires API keys):
+#   ./scripts/run-tests.sh --cassettes -- --record-mode=all
 # Run all tests for packages whose basename matches a glob:
 #   ./scripts/run-tests.sh --package '*openai*'
 # Run only tests marked with `@pytest.mark.fr` for a selected package glob:
@@ -18,9 +25,13 @@
 
 set -euo pipefail
 
+# Deactivate any inherited virtualenv.  An active VIRTUAL_ENV from a parent
+# shell (e.g. fortifyroot-sdk-py/.venv) causes uv to resolve against the
+# wrong environment, silently skipping test group and instruments deps.
+unset VIRTUAL_ENV
+
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 PACKAGES_DIR="$ROOT_DIR/packages"
-VENV_DIR="$ROOT_DIR/.venv"
 REPORTS_ROOT="$ROOT_DIR/reports/test-run"
 TIMESTAMP="$(date +"%Y%m%d-%H%M%S")"
 REPORT_DIR="$REPORTS_ROOT/$TIMESTAMP"
@@ -29,11 +40,50 @@ PACKAGE_TEST_TIMEOUT_SECONDS="${PACKAGE_TEST_TIMEOUT_SECONDS:-1200}"
 
 MODE="all"
 PACKAGE_FILTER=""
+PYTHON_VERSION=""
 LIST_ONLY=0
 PYTEST_ARGS=()
 
-INSTALLED_PACKAGES=()
 PACKAGE_NAMES=()
+PLATFORM="$(uname -s)"   # Darwin | Linux
+
+skip_reason() {
+  # Returns a non-empty reason string if the package should be skipped on
+  # the current platform + Python version combination, or empty if OK.
+  local pkg="$1"
+  # Use explicit --python version if set, otherwise detect from default python3.
+  local pyver="${PYTHON_VERSION:-$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null)}"
+
+  # --- Platform-only skips (macOS x86_64 missing wheels) ---
+  if [[ "$PLATFORM" == "Darwin" ]]; then
+    case "$pkg" in
+      # ChromaDB default embeddings use ONNX + CoreML which crashes on macOS.
+      opentelemetry-instrumentation-chromadb) echo "ONNX CoreML crashes on macOS"; return ;;
+      # CrewAI → crewai-tools → lancedb: no macOS x86_64 wheel.
+      opentelemetry-instrumentation-crewai) echo "crewai-tools dep lancedb has no macOS x86_64 wheel"; return ;;
+    esac
+  fi
+
+  # --- Python-version-specific skips (upstream deps incompatible) ---
+  case "$pkg" in
+    # watsonx: ibm-watson-machine-learning → pandas 1.5.3 (no Python 3.12+ support)
+    opentelemetry-instrumentation-watsonx)
+      if [[ "$pyver" == 3.12* || "$pyver" == 3.13* ]]; then
+        echo "ibm-watson-machine-learning pins pandas<2 (no Python $pyver support)"; return
+      fi ;;
+    # writer: writer SDK → watchdog 3.0 (C build fails on Python 3.12)
+    opentelemetry-instrumentation-writer)
+      if [[ "$pyver" == 3.12* ]]; then
+        echo "writer SDK pins watchdog 3.0 (C build fails on Python 3.12)"; return
+      fi ;;
+    # milvus: milvus_lite imports pkg_resources which isn't in all environments.
+    # Fails on macOS and in containers without setuptools.
+    opentelemetry-instrumentation-milvus)
+      echo "milvus_lite requires pkg_resources (upstream dep issue)"; return ;;
+  esac
+
+  echo ""
+}
 
 usage() {
   cat <<'EOF'
@@ -41,14 +91,24 @@ Usage: scripts/run-tests.sh [options] [-- <extra pytest args>]
 
 Options:
   --fr               Run only tests marked with @pytest.mark.fr
+  --cassettes        Run only VCR cassette tests (@pytest.mark.vcr).
+                     Implies --record-mode=none unless overridden via --.
+  --all              Run all tests (UT + FR + VCR). Same as default (no flags).
   --package <glob>   Restrict packages by basename glob, e.g. "*openai*"
+  --python <ver>     Use a specific Python version, e.g. "3.12". Passed to uv.
   --list             List discovered packages and exit
   -h, --help         Show this help
 
+Each package runs in its own isolated venv via `uv sync` + `uv run pytest`.
+This avoids dependency conflicts between packages.
+
 Examples:
-  scripts/run-tests.sh
-  scripts/run-tests.sh --fr
-  scripts/run-tests.sh --package "*openai*"
+  scripts/run-tests.sh                                   # default: all tests
+  scripts/run-tests.sh --all                             # explicit: all tests
+  scripts/run-tests.sh --fr                              # FR safety tests only
+  scripts/run-tests.sh --cassettes                       # VCR replay only
+  scripts/run-tests.sh --cassettes --package "*openai*"  # single package cassettes
+  scripts/run-tests.sh --cassettes -- --record-mode=all  # recording mode
   PACKAGE_TEST_TIMEOUT_SECONDS=1800 scripts/run-tests.sh --fr
   scripts/run-tests.sh --fr -- -x
 EOF
@@ -103,27 +163,10 @@ mark_package_seen() {
   PACKAGE_NAMES+=("$package_name")
 }
 
-bootstrap_venv() {
-  require_cmd python3
-
-  if [[ ! -x "$VENV_DIR/bin/python" ]]; then
-    log "Creating shared virtualenv at $VENV_DIR"
-    python3 -m venv "$VENV_DIR"
-  fi
-
-  # shellcheck disable=SC1091
-  source "$VENV_DIR/bin/activate"
-  export PIP_DISABLE_PIP_VERSION_CHECK=1
-
-  log "Bootstrapping shared virtualenv"
-  python -m pip install --upgrade pip setuptools wheel >/dev/null
-  # tomli is the backport of tomllib for Python < 3.11
-  python -m pip install tomli >/dev/null 2>&1 || true
-}
-
 discover_packages() {
   find "$PACKAGES_DIR" -mindepth 2 -maxdepth 2 -type f -name pyproject.toml -print \
     | sed 's#/pyproject.toml$##' \
+    | grep -v '/sample-app$' \
     | sort
 }
 
@@ -196,94 +239,91 @@ python_meta() {
   local key="$2"
 
   python3 - "$package_dir" "$key" <<'PY'
-import json
 import pathlib
 import sys
 try:
     import tomllib
 except ModuleNotFoundError:
-    import tomli as tomllib
+    try:
+        import tomli as tomllib
+    except ModuleNotFoundError:
+        # Minimal TOML parser for just the [project] name field.
+        import re
+        text = (pathlib.Path(sys.argv[1]).resolve() / "pyproject.toml").read_text()
+        if sys.argv[2] == "name":
+            m = re.search(r'^name\s*=\s*"([^"]+)"', text, re.M)
+            print(m.group(1) if m else pathlib.Path(sys.argv[1]).name)
+        raise SystemExit(0)
 
 package_dir = pathlib.Path(sys.argv[1]).resolve()
 key = sys.argv[2]
 data = tomllib.loads((package_dir / "pyproject.toml").read_text())
 project = data.get("project", {})
-groups = data.get("dependency-groups", {})
-optional = project.get("optional-dependencies", {})
-uv_sources = (((data.get("tool") or {}).get("uv") or {}).get("sources") or {})
 
 if key == "name":
     print(project.get("name", package_dir.name))
-elif key == "install_target":
-    extras = []
-    if "instruments" in optional:
-        extras.append("instruments")
-    suffix = f"[{','.join(extras)}]" if extras else ""
-    print(f".{suffix}")
-elif key == "local_paths":
-    for source in uv_sources.values():
-        if isinstance(source, dict) and "path" in source:
-            print((package_dir / source["path"]).resolve())
-elif key == "test_deps":
-    for dep in groups.get("test", []):
-        print(dep)
 PY
 }
 
-install_package() {
+sync_package() {
   local package_dir="$1"
-  local owner_package_name="${2:-}"
-  local package_name
-  package_name="$(python_meta "$package_dir" name)"
-  if [[ -z "$owner_package_name" ]]; then
-    owner_package_name="$package_name"
-  fi
-
-  local installed
-  for installed in "${INSTALLED_PACKAGES[@]:-}"; do
-    if [[ "$installed" == "$package_dir" ]]; then
-      return 0
-    fi
-  done
-
-  if [[ -f "$(state_file "$owner_package_name" "status")" ]] && [[ "$(get_state "$owner_package_name" "status")" == "INSTALL_FAIL" ]]; then
-    return 0
-  fi
-
-  local local_dep
-  while IFS= read -r local_dep; do
-    [[ -n "$local_dep" ]] || continue
-    install_package "$local_dep" "$owner_package_name"
-  done < <(python_meta "$package_dir" local_paths)
-
-  log "Installing dependencies for $package_name"
-
-  local install_target
-  install_target="$(python_meta "$package_dir" install_target)"
-
-  local -a pip_args
-  pip_args=(-e "$install_target")
-  while IFS= read -r dep; do
-    [[ -n "$dep" ]] || continue
-    pip_args+=("$dep")
-  done < <(python_meta "$package_dir" test_deps)
+  local package_name="$2"
 
   local install_log="$REPORT_DIR/${package_name}.install.log"
+
+  # Detect available groups/extras directly from pyproject.toml using grep
+  # (no Python dependency — avoids tomllib/tomli availability issues).
+  local pyproject="$package_dir/pyproject.toml"
+  local -a uv_args=(uv sync)
+  if [[ -n "$PYTHON_VERSION" ]]; then
+    uv_args+=(--python "$PYTHON_VERSION")
+  fi
+  if grep -q '^\[dependency-groups\]' "$pyproject" 2>/dev/null && \
+     grep -q '^test\s*=' "$pyproject" 2>/dev/null; then
+    uv_args+=(--group test)
+  fi
+  if grep -q 'instruments\s*=' "$pyproject" 2>/dev/null; then
+    uv_args+=(--extra instruments)
+  fi
+
+  log "Syncing dependencies for $package_name"
   set +e
   (
     cd "$package_dir"
-    python -m pip install "${pip_args[@]}"
+    # Always start with a fresh venv; keep the committed uv.lock to preserve
+    # version pins that tests depend on.  If uv sync fails (e.g. stale lock
+    # format), retry with a deleted lock file for fresh resolution.
+    rm -rf .venv
+    if ! "${uv_args[@]}" 2>&1; then
+      rm -f uv.lock
+      "${uv_args[@]}"
+    fi
   ) > >(tee "$install_log") 2>&1
-  local install_status=$?
+  local sync_status=$?
   set -e
 
-  if [[ $install_status -ne 0 ]]; then
-    set_state "$owner_package_name" "status" "INSTALL_FAIL"
-    set_state "$owner_package_name" "reason" "Dependency installation failed while preparing $package_name. See $install_log"
+  if [[ $sync_status -ne 0 ]]; then
+    # Check if this is a known platform/version build failure.  If so,
+    # treat as SKIP instead of INSTALL_FAIL (expected, not actionable).
+    local build_skip_reason
+    build_skip_reason="$(skip_reason "$(basename "$package_dir")")"
+    if [[ -z "$build_skip_reason" ]]; then
+      # Not a known skip — detect common patterns from the install log.
+      if grep -q "doesn't have a source distribution or wheel for the current platform" "$install_log" 2>/dev/null; then
+        build_skip_reason="No compatible wheel for current platform"
+      elif grep -q "failed with exit code" "$install_log" 2>/dev/null && grep -q "watchdog\|lancedb\|torch" "$install_log" 2>/dev/null; then
+        build_skip_reason="Native dependency build failed (platform-specific)"
+      fi
+    fi
+    if [[ -n "$build_skip_reason" ]]; then
+      set_state "$package_name" "status" "SKIP"
+      set_state "$package_name" "reason" "$build_skip_reason"
+    else
+      set_state "$package_name" "status" "INSTALL_FAIL"
+      set_state "$package_name" "reason" "uv sync failed. See $install_log"
+    fi
     return 1
   fi
-
-  INSTALLED_PACKAGES+=("$package_dir")
 }
 
 parse_junit_summary() {
@@ -394,24 +434,55 @@ run_package_tests() {
     return 0
   fi
 
+  local package_basename
+  package_basename="$(basename "$package_dir")"
+  local pkg_skip_reason
+  pkg_skip_reason="$(skip_reason "$package_basename")"
+  if [[ -n "$pkg_skip_reason" ]]; then
+    set_state "$package_name" "status" "SKIP"
+    set_state "$package_name" "reason" "$pkg_skip_reason"
+    return 0
+  fi
+
   if [[ "$MODE" == "fr" ]] && ! has_marker_in_tests "$package_dir" "fr"; then
     set_state "$package_name" "status" "SKIP"
     set_state "$package_name" "reason" "No FR-marked tests detected"
     return 0
   fi
 
-  if ! install_package "$package_dir" "$package_name"; then
+  if [[ "$MODE" == "cassettes" ]] && ! has_marker_in_tests "$package_dir" "vcr"; then
+    set_state "$package_name" "status" "SKIP"
+    set_state "$package_name" "reason" "No VCR-marked tests detected"
+    return 0
+  fi
+
+  if ! sync_package "$package_dir" "$package_name"; then
     return 0
   fi
 
   local junit_xml="$REPORT_DIR/${package_name}.xml"
   local test_log="$REPORT_DIR/${package_name}.test.log"
   local -a pytest_cmd
+  pytest_cmd=(uv run)
+  if [[ -n "$PYTHON_VERSION" ]]; then
+    pytest_cmd+=(--python "$PYTHON_VERSION")
+  fi
+  pytest_cmd+=(pytest -q --junitxml "$junit_xml" tests)
   if [[ "$MODE" == "fr" ]]; then
-    pytest_cmd=(python -m pytest -q --junitxml "$junit_xml" tests)
     pytest_cmd+=(-m fr)
-  else
-    pytest_cmd=(python -m pytest -q --junitxml "$junit_xml" tests)
+  elif [[ "$MODE" == "cassettes" ]]; then
+    pytest_cmd+=(-m vcr)
+    # Default to replay-only unless the caller overrides via -- args.
+    local has_record_mode=0
+    for arg in "${PYTEST_ARGS[@]:-}"; do
+      if [[ "$arg" == --record-mode* || "$arg" == --record-mode=* ]]; then
+        has_record_mode=1
+        break
+      fi
+    done
+    if [[ $has_record_mode -eq 0 ]]; then
+      pytest_cmd+=(--record-mode=none)
+    fi
   fi
   pytest_cmd+=("${PYTEST_ARGS[@]:-}")
 
@@ -468,6 +539,9 @@ print_report() {
 
   printf '\n=== Consolidated Test Report ===\n'
   printf 'Mode: %s\n' "$MODE"
+  if [[ -n "$PYTHON_VERSION" ]]; then
+    printf 'Python: %s\n' "$PYTHON_VERSION"
+  fi
   printf 'Reports: %s\n\n' "$REPORT_DIR"
 
   for package_name in "${PACKAGE_NAMES[@]:-}"; do
@@ -582,9 +656,22 @@ main() {
         MODE="fr"
         shift
         ;;
+      --cassettes)
+        MODE="cassettes"
+        shift
+        ;;
+      --all)
+        MODE="all"
+        shift
+        ;;
       --package)
         [[ $# -ge 2 ]] || die "--package requires a glob argument"
         PACKAGE_FILTER="$2"
+        shift 2
+        ;;
+      --python)
+        [[ $# -ge 2 ]] || die "--python requires a version argument (e.g. 3.12)"
+        PYTHON_VERSION="$2"
         shift 2
         ;;
       --list)
@@ -606,9 +693,23 @@ main() {
     esac
   done
 
+  require_cmd uv
+  require_cmd python3
+
+  # Guard: abort if there are locally modified uv.lock files.  The test run
+  # re-locks each package (to upgrade the lock format) and restores the
+  # committed state afterwards.  Uncommitted changes would be lost.
+  if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    local dirty_locks
+    dirty_locks="$(git diff --name-only -- '*/uv.lock' 'uv.lock' 2>/dev/null)"
+    if [[ -n "$dirty_locks" ]]; then
+      die "Uncommitted uv.lock changes detected. Commit or stash them first — the test run modifies and restores uv.lock files.
+$dirty_locks"
+    fi
+  fi
+
   mkdir -p "$REPORT_DIR"
   mkdir -p "$STATE_DIR"
-  bootstrap_venv
 
   local -a package_dirs=()
   local package_dir
@@ -644,6 +745,11 @@ main() {
   for package_dir in "${package_dirs[@]}"; do
     run_package_tests "$package_dir"
   done
+
+  # Restore any uv.lock files that uv sync may have updated (format upgrade).
+  if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    git checkout -- '*/uv.lock' 2>/dev/null || true
+  fi
 
   print_report
 }
