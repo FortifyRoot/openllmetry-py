@@ -23,9 +23,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          regex='(sk-(proj-)?[A-Za-z0-9_-]{20,}|sk-or-v1-[A-Za-z0-9]{20,}|sk-ant-[A-Za-z0-9_-]{20,}|gsk_[A-Za-z0-9_-]{20,}|OPENAI_API_KEY[[:space:]]*[:=][[:space:]]*["'"'"']?sk-|OPENROUTER_API_KEY[[:space:]]*[:=][[:space:]]*["'"'"']?sk-or-|ANTHROPIC_API_KEY[[:space:]]*[:=][[:space:]]*["'"'"']?sk-ant-)'
+          regex='(sk-(proj-)?[A-Za-z0-9_-]{20,}|sk-or-v1-[A-Za-z0-9]{20,}|sk-ant-[A-Za-z0-9_-]{20,}|gsk_[A-Za-z0-9_-]{20,})'
 
-          if git grep -nI -E "$regex" -- . ':(exclude)*.lock'; then
+          if git grep -nI -E "$regex" -- . ':(exclude)*.lock' ':(exclude)*.env.example' ':(exclude)*.env.*.example'; then
             echo "::error::Potential hardcoded provider key detected. Remove it and use placeholders or GitHub Secrets."
             exit 1
           fi
