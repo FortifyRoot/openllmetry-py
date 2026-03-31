@@ -1,0 +1,119 @@
+interactions:
+- request:
+    body: '{"max_tokens":100,"messages":[{"role":"user","content":"Create a fictional
+      contact card. The person''s name is Jane Smith, company is Widgets Inc, role
+      is VP of Sales. Invent a plausible work email and phone. Format as:\nName: ...\nEmail:
+      ...\nPhone: ..."}],"model":"claude-3-haiku-20240307"}'
+    headers:
+      Accept:
+      - application/json
+      Accept-Encoding:
+      - gzip, deflate
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '291'
+      Content-Type:
+      - application/json
+      Host:
+      - api.anthropic.com
+      User-Agent:
+      - Anthropic/Python 0.76.0
+      X-Stainless-Arch:
+      - x64
+      X-Stainless-Async:
+      - 'false'
+      X-Stainless-Lang:
+      - python
+      X-Stainless-OS:
+      - MacOS
+      X-Stainless-Package-Version:
+      - 0.76.0
+      X-Stainless-Runtime:
+      - CPython
+      X-Stainless-Runtime-Version:
+      - 3.10.19
+      anthropic-version:
+      - '2023-06-01'
+      x-stainless-read-timeout:
+      - '600'
+      x-stainless-retry-count:
+      - '0'
+      x-stainless-timeout:
+      - '600'
+    method: POST
+    uri: https://api.anthropic.com/v1/messages
+  response:
+    body:
+      string: !!binary |
+        H4sIAAAAAAAAA3SRX0/CMBTFv0rTJ002MhjD2CcTMEYSDYrRB2easl1YZb2dawcSwnf3DsW/8anN
+        +Z3T3NO75cbmUHLBs1I1OYRxWCi9bMJe1OtHcXTCA65zwsYtZNQdVr2r5Wx8cQqjZTK+GSHq5G5N
+        Hr+poHWBc2oBJNS2bAXlnHZeoScps+iBbuJxe/B7eG3J/hD8WhkQbKwQ2NRoX6R4bpQuBXsmqeNa
+        6Wyt8wV4F2rMOpk1KU4Ki5Q6SpLkmHV7cdhPBicpDq2pFG4Ee3gPsEsKpHhLYwl2P2F2zqaqBMd3
+        TwF33layBuUs0hiAufRNjfwDOHhpADOaF5uyDHizryi2XGPVeOntEtBxMYioosoKkBk95bVF+dPw
+        yQnn/7FDtn0fqgIM1KqUifnr/6Ld4jfdBdw2/rvUj6kN1CudgfQaaurZ7iVXdd6uGOdQtx3lAiwh
+        tF6qFf29mtEad7s3AAAA//8DACGJtMonAgAA
+    headers:
+      CF-RAY:
+      - 9e4d64bb2e0c343c-BLR
+      Connection:
+      - keep-alive
+      Content-Encoding:
+      - gzip
+      Content-Security-Policy:
+      - default-src 'none'; frame-ancestors 'none'
+      Content-Type:
+      - application/json
+      Date:
+      - Tue, 31 Mar 2026 06:45:52 GMT
+      Server:
+      - cloudflare
+      Transfer-Encoding:
+      - chunked
+      X-Robots-Tag:
+      - none
+      anthropic-organization-id:
+      - 887534b2-e0d2-4865-a85b-8a07958e7c46
+      anthropic-ratelimit-input-tokens-limit:
+      - '50000'
+      anthropic-ratelimit-input-tokens-remaining:
+      - '50000'
+      anthropic-ratelimit-input-tokens-reset:
+      - '2026-03-31T06:45:51Z'
+      anthropic-ratelimit-output-tokens-limit:
+      - '10000'
+      anthropic-ratelimit-output-tokens-remaining:
+      - '10000'
+      anthropic-ratelimit-output-tokens-reset:
+      - '2026-03-31T06:45:52Z'
+      anthropic-ratelimit-requests-limit:
+      - '50'
+      anthropic-ratelimit-requests-remaining:
+      - '49'
+      anthropic-ratelimit-requests-reset:
+      - '2026-03-31T06:45:52Z'
+      anthropic-ratelimit-tokens-limit:
+      - '60000'
+      anthropic-ratelimit-tokens-remaining:
+      - '60000'
+      anthropic-ratelimit-tokens-reset:
+      - '2026-03-31T06:45:51Z'
+      cf-cache-status:
+      - DYNAMIC
+      request-id:
+      - req_011CZahzbVb1AiRvw4Vt4RMN
+      server-timing:
+      - x-originResponse;dur=2117
+      set-cookie:
+      - _cfuvid=tTEqPPU6i6l3LWpP9vF5khnfa52Kpuj5ZM_qs1a9r_Y-1774939549.9445589-1.0.1.1-NmWwuMGTfSoZLFOOIxF0Ms9CS0TjqCfjcUuY20Im7l4;
+        HttpOnly; SameSite=None; Secure; Path=/; Domain=api.anthropic.com
+      strict-transport-security:
+      - max-age=31536000; includeSubDomains; preload
+      vary:
+      - Accept-Encoding
+      x-envoy-upstream-service-time:
+      - '2115'
+    status:
+      code: 200
+      message: OK
+version: 1

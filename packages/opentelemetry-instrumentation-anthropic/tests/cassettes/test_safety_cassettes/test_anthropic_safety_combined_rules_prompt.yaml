@@ -1,0 +1,118 @@
+interactions:
+- request:
+    body: '{"max_tokens":50,"messages":[{"role":"user","content":"Send the [custom_compliance.project-phoenix]
+      briefing to [PII.email] and CC the [PII.competitor_org] team."}],"model":"claude-3-haiku-20240307"}'
+    headers:
+      Accept:
+      - application/json
+      Accept-Encoding:
+      - gzip, deflate
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '199'
+      Content-Type:
+      - application/json
+      Host:
+      - api.anthropic.com
+      User-Agent:
+      - Anthropic/Python 0.76.0
+      X-Stainless-Arch:
+      - x64
+      X-Stainless-Async:
+      - 'false'
+      X-Stainless-Lang:
+      - python
+      X-Stainless-OS:
+      - MacOS
+      X-Stainless-Package-Version:
+      - 0.76.0
+      X-Stainless-Runtime:
+      - CPython
+      X-Stainless-Runtime-Version:
+      - 3.10.19
+      anthropic-version:
+      - '2023-06-01'
+      x-stainless-read-timeout:
+      - '600'
+      x-stainless-retry-count:
+      - '0'
+      x-stainless-timeout:
+      - '600'
+    method: POST
+    uri: https://api.anthropic.com/v1/messages
+  response:
+    body:
+      string: !!binary |
+        H4sIAAAAAAAAA3RS227bMAz9FULPTuCmDQb4dcWA7GlAh2HdMBiMRMdEZMmV6KRpkH8f5S3rLtiT
+        ZZ4LySOdzRAdedMY63FytLhd9Mj7abGqV3f1bf3GVIadwkPetfXN2/efnh6m1ecO84M8Dvf3776s
+        H1fKkdNIhUU54460kKIvBcyZs2AQLdkYhPTUfD1f+ULPBZk/jdkAjtHHHb9QBdtJYAMWQ4gCmYID
+        1Xfs1IHRA4cupgGFY4CYYKSUY0DvT/CD0jFuPYFDQTiy9FHtxhSVBzjpb+KXWbyEjz0KHOPkHWwJ
+        ELaJ0PYQO+XzAe0JUJvPRmogZOeeOihbprx8HdLGYfQkBNJzhkRPE2UBzKABCLklfPCEmUA5MBDs
+        QzwCd8qmRKAKVBM9wxFPsDGXb5XJEsdWx9HVSrj43ErcU8jmJ5RLj2A1yTB5X5lpDr85Gw7jJFdy
+        c1dr+LoTtVbNyvjtn4RfuMLuf9hVW/xp7GmghL5dD//yX9Gb/m/0Uhm9it9La1VkSge21ApT0k3L
+        i3GYXHl8odN4dMd2R1EhzajFA7Iv12sul+8AAAD//wMAMNgwMcECAAA=
+    headers:
+      CF-RAY:
+      - 9e4cd943ebe1b22e-BLR
+      Connection:
+      - keep-alive
+      Content-Encoding:
+      - gzip
+      Content-Security-Policy:
+      - default-src 'none'; frame-ancestors 'none'
+      Content-Type:
+      - application/json
+      Date:
+      - Tue, 31 Mar 2026 05:10:38 GMT
+      Server:
+      - cloudflare
+      Transfer-Encoding:
+      - chunked
+      X-Robots-Tag:
+      - none
+      anthropic-organization-id:
+      - 887534b2-e0d2-4865-a85b-8a07958e7c46
+      anthropic-ratelimit-input-tokens-limit:
+      - '50000'
+      anthropic-ratelimit-input-tokens-remaining:
+      - '50000'
+      anthropic-ratelimit-input-tokens-reset:
+      - '2026-03-31T05:10:37Z'
+      anthropic-ratelimit-output-tokens-limit:
+      - '10000'
+      anthropic-ratelimit-output-tokens-remaining:
+      - '10000'
+      anthropic-ratelimit-output-tokens-reset:
+      - '2026-03-31T05:10:38Z'
+      anthropic-ratelimit-requests-limit:
+      - '50'
+      anthropic-ratelimit-requests-remaining:
+      - '48'
+      anthropic-ratelimit-requests-reset:
+      - '2026-03-31T05:10:39Z'
+      anthropic-ratelimit-tokens-limit:
+      - '60000'
+      anthropic-ratelimit-tokens-remaining:
+      - '60000'
+      anthropic-ratelimit-tokens-reset:
+      - '2026-03-31T05:10:37Z'
+      cf-cache-status:
+      - DYNAMIC
+      request-id:
+      - req_011CZaajW6f3QeKp6ztiZgNR
+      server-timing:
+      - x-originResponse;dur=608
+      set-cookie:
+      - _cfuvid=mMY_0NE_wfM8aY65GDzEg8HhNDcPGaFMTL3U79Tvw24-1774933837.429631-1.0.1.1-l6yg4p8u2vaUAmw96B7q2K11Xo_0PQF9ouobZdpgmZU;
+        HttpOnly; SameSite=None; Secure; Path=/; Domain=api.anthropic.com
+      strict-transport-security:
+      - max-age=31536000; includeSubDomains; preload
+      vary:
+      - Accept-Encoding
+      x-envoy-upstream-service-time:
+      - '607'
+    status:
+      code: 200
+      message: OK
+version: 1
