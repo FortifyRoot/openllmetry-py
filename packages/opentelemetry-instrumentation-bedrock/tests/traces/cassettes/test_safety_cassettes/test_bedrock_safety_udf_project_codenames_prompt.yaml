@@ -1,0 +1,48 @@
+interactions:
+- request:
+    body: '{"messages": [{"role": "user", "content": [{"text": "Prepare a status update
+      for [custom_compliance.project-phoenix] and [custom_compliance.operation-atlas]
+      including timeline and budget."}]}], "inferenceConfig": {"maxTokens": 50}}'
+    headers:
+      Content-Length:
+      - '231'
+      Content-Type:
+      - !!binary |
+        YXBwbGljYXRpb24vanNvbg==
+      User-Agent:
+      - !!binary |
+        Qm90bzMvMS40Mi4yOCBtZC9Cb3RvY29yZSMxLjQyLjI4IHVhLzIuMSBvcy9tYWNvcyMyNC42LjAg
+        bWQvYXJjaCN4ODZfNjQgbGFuZy9weXRob24jMy4xMC4xOSBtZC9weWltcGwjQ1B5dGhvbiBtL1os
+        ZSxiLEQgY2ZnL3JldHJ5LW1vZGUjbGVnYWN5IEJvdG9jb3JlLzEuNDIuMjg=
+      X-Amz-Date:
+      - !!binary |
+        MjAyNjA0MDFUMDYxNzMxWg==
+      amz-sdk-invocation-id:
+      - !!binary |
+        YWM4OWZiYjgtMWIzYy00ZDRhLWIxYjktMTg2ODJkY2QyNzkx
+      amz-sdk-request:
+      - !!binary |
+        YXR0ZW1wdD0x
+    method: POST
+    uri: https://bedrock-runtime.us-east-1.amazonaws.com/model/anthropic.claude-3-haiku-20240307-v1%3A0/converse
+  response:
+    body:
+      string: '{"metrics":{"latencyMs":1406},"output":{"message":{"content":[{"text":"Here
+        is a status update for the [custom_compliance.project-phoenix] and [custom_compliance.operation-atlas]
+        projects:\n\n[custom_compliance.project-phoenix]:\nTimeline:\n- Project kick-off
+        completed on schedule"}],"role":"assistant"}},"stopReason":"max_tokens","usage":{"inputTokens":37,"outputTokens":50,"serverToolUsage":{},"totalTokens":87}}'
+    headers:
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '415'
+      Content-Type:
+      - application/json
+      Date:
+      - Wed, 01 Apr 2026 06:17:34 GMT
+      x-amzn-RequestId:
+      - 57685ff1-d624-462c-b194-88c11227fd0f
+    status:
+      code: 200
+      message: OK
+version: 1

@@ -1,0 +1,64 @@
+interactions:
+- request:
+    body: '{"contents": [{"parts": [{"text": "Check if order for card [PCI.credit_card]
+      was processed."}], "role": "user"}], "generationConfig": {"maxOutputTokens":
+      50}}'
+    headers:
+      Accept:
+      - '*/*'
+      Accept-Encoding:
+      - gzip, deflate
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '158'
+      Content-Type:
+      - application/json
+      Host:
+      - generativelanguage.googleapis.com
+      user-agent:
+      - google-genai-sdk/1.58.0 gl-python/3.10.19
+      x-goog-api-client:
+      - google-genai-sdk/1.58.0 gl-python/3.10.19
+    method: POST
+    uri: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent
+  response:
+    body:
+      string: !!binary |
+        H4sIAAAAAAAC/1WQX0vDMBTF3/MpQp6d6JxDfBPbhyL1b5ENkZHZuzaaJqW5hWnZdzdply7NQwj3
+        nNx7z68jlLIvrnKRcwTDbumHrVDa9bfTtEJQaAVfssWaN3jyDqcL3taCsHefWEJtd6WRBfJhfH+e
+        nZo2WoL7UekcpLcfvIHthBKmfAVutHK29G61yZ4e4sc3NnqEymFvxQvix/QDWGt4ASkgtyH5GIXV
+        ja5qzPQPqHvd9iEvl0OzgMlEnx9l1MjlRFl6KehqIjtTyBBVQNEG5VLgr0uTxauMBTBwupSnQQJo
+        DEvdFiVOF1wsyJHaAPIdGiMGYgVUluFsfn4920luyn4ea8DUWhlIcudZY5Ty7Z+Jk2z73abPV5tI
+        37wUjBzIP9QNG14rAgAA
+    headers:
+      Alt-Svc:
+      - h3=":443"; ma=2592000,h3-29=":443"; ma=2592000
+      Content-Encoding:
+      - gzip
+      Content-Type:
+      - application/json; charset=UTF-8
+      Date:
+      - Wed, 01 Apr 2026 07:59:31 GMT
+      Server:
+      - scaffolding on HTTPServer2
+      Server-Timing:
+      - gfet4t7; dur=1305
+      Transfer-Encoding:
+      - chunked
+      Vary:
+      - Origin
+      - X-Origin
+      - Referer
+      X-Content-Type-Options:
+      - nosniff
+      X-Frame-Options:
+      - SAMEORIGIN
+      X-Gemini-Service-Tier:
+      - standard
+      X-XSS-Protection:
+      - '0'
+    status:
+      code: 200
+      message: OK
+version: 1

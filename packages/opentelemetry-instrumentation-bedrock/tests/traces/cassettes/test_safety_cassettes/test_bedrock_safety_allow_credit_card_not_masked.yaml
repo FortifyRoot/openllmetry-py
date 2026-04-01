@@ -1,0 +1,49 @@
+interactions:
+- request:
+    body: '{"messages": [{"role": "user", "content": [{"text": "Verify payment for
+      card 4111 1111 1111 1111 was received."}]}], "inferenceConfig": {"maxTokens":
+      50}}'
+    headers:
+      Content-Length:
+      - '154'
+      Content-Type:
+      - !!binary |
+        YXBwbGljYXRpb24vanNvbg==
+      User-Agent:
+      - !!binary |
+        Qm90bzMvMS40Mi4yOCBtZC9Cb3RvY29yZSMxLjQyLjI4IHVhLzIuMSBvcy9tYWNvcyMyNC42LjAg
+        bWQvYXJjaCN4ODZfNjQgbGFuZy9weXRob24jMy4xMC4xOSBtZC9weWltcGwjQ1B5dGhvbiBtL1os
+        ZSxiLEQgY2ZnL3JldHJ5LW1vZGUjbGVnYWN5IEJvdG9jb3JlLzEuNDIuMjg=
+      X-Amz-Date:
+      - !!binary |
+        MjAyNjA0MDFUMDYxNzQzWg==
+      amz-sdk-invocation-id:
+      - !!binary |
+        OGZhNGRmMmItODk4MC00Zjk3LTliN2YtZTRhMDM4YTIwYzkx
+      amz-sdk-request:
+      - !!binary |
+        YXR0ZW1wdD0x
+    method: POST
+    uri: https://bedrock-runtime.us-east-1.amazonaws.com/model/anthropic.claude-3-haiku-20240307-v1%3A0/converse
+  response:
+    body:
+      string: '{"metrics":{"latencyMs":1244},"output":{"message":{"content":[{"text":"I
+        apologize, but I do not have the ability to verify or access payment information
+        for specific credit card numbers. As an AI assistant without direct access
+        to financial systems, I don''t have a way to confirm payment details. I can
+        only provide general"}],"role":"assistant"}},"stopReason":"max_tokens","usage":{"inputTokens":28,"outputTokens":50,"serverToolUsage":{},"totalTokens":78}}'
+    headers:
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '458'
+      Content-Type:
+      - application/json
+      Date:
+      - Wed, 01 Apr 2026 06:17:45 GMT
+      x-amzn-RequestId:
+      - cd677757-8407-47a8-9508-4490564060f0
+    status:
+      code: 200
+      message: OK
+version: 1

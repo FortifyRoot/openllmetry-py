@@ -1,0 +1,49 @@
+interactions:
+- request:
+    body: '{"messages": [{"role": "user", "content": [{"text": "Summarize the following
+      customer inquiry from [PII.email] about their recent order."}]}], "inferenceConfig":
+      {"maxTokens": 50}}'
+    headers:
+      Content-Length:
+      - '180'
+      Content-Type:
+      - !!binary |
+        YXBwbGljYXRpb24vanNvbg==
+      User-Agent:
+      - !!binary |
+        Qm90bzMvMS40Mi4yOCBtZC9Cb3RvY29yZSMxLjQyLjI4IHVhLzIuMSBvcy9tYWNvcyMyNC42LjAg
+        bWQvYXJjaCN4ODZfNjQgbGFuZy9weXRob24jMy4xMC4xOSBtZC9weWltcGwjQ1B5dGhvbiBtL1os
+        ZSxiLEQgY2ZnL3JldHJ5LW1vZGUjbGVnYWN5IEJvdG9jb3JlLzEuNDIuMjg=
+      X-Amz-Date:
+      - !!binary |
+        MjAyNjA0MDFUMDYxNzI1Wg==
+      amz-sdk-invocation-id:
+      - !!binary |
+        YTkwYjQzODgtNDQwMy00OGZlLWI3ZjYtOTlmZDA1ZjZmZDUx
+      amz-sdk-request:
+      - !!binary |
+        YXR0ZW1wdD0x
+    method: POST
+    uri: https://bedrock-runtime.us-east-1.amazonaws.com/model/anthropic.claude-3-haiku-20240307-v1%3A0/converse
+  response:
+    body:
+      string: '{"metrics":{"latencyMs":999},"output":{"message":{"content":[{"text":"Unfortunately,
+        I cannot summarize the customer inquiry without seeing the actual details
+        of the inquiry. As an AI assistant, I do not have access to any real customer
+        information or inquiries. I can only respond based on the information you
+        provide to me directly"}],"role":"assistant"}},"stopReason":"max_tokens","usage":{"inputTokens":26,"outputTokens":50,"serverToolUsage":{},"totalTokens":76}}'
+    headers:
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '467'
+      Content-Type:
+      - application/json
+      Date:
+      - Wed, 01 Apr 2026 06:17:27 GMT
+      x-amzn-RequestId:
+      - dba8cd0c-ba21-44d6-9a7b-d1988aca9ae5
+    status:
+      code: 200
+      message: OK
+version: 1

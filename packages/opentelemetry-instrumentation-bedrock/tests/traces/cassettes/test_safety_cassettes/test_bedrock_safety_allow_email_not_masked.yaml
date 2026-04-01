@@ -1,0 +1,48 @@
+interactions:
+- request:
+    body: '{"messages": [{"role": "user", "content": [{"text": "Forward this message
+      from alice.jones@example.org to the support team."}]}], "inferenceConfig": {"maxTokens":
+      50}}'
+    headers:
+      Content-Length:
+      - '167'
+      Content-Type:
+      - !!binary |
+        YXBwbGljYXRpb24vanNvbg==
+      User-Agent:
+      - !!binary |
+        Qm90bzMvMS40Mi4yOCBtZC9Cb3RvY29yZSMxLjQyLjI4IHVhLzIuMSBvcy9tYWNvcyMyNC42LjAg
+        bWQvYXJjaCN4ODZfNjQgbGFuZy9weXRob24jMy4xMC4xOSBtZC9weWltcGwjQ1B5dGhvbiBtL1os
+        ZSxiLEQgY2ZnL3JldHJ5LW1vZGUjbGVnYWN5IEJvdG9jb3JlLzEuNDIuMjg=
+      X-Amz-Date:
+      - !!binary |
+        MjAyNjA0MDFUMDYxNzQwWg==
+      amz-sdk-invocation-id:
+      - !!binary |
+        MjU2MmUzZTQtYmZhYS00N2U0LWI5ZjEtMDFhMTkxM2RlNjFj
+      amz-sdk-request:
+      - !!binary |
+        YXR0ZW1wdD0x
+    method: POST
+    uri: https://bedrock-runtime.us-east-1.amazonaws.com/model/anthropic.claude-3-haiku-20240307-v1%3A0/converse
+  response:
+    body:
+      string: '{"metrics":{"latencyMs":1587},"output":{"message":{"content":[{"text":"I''m
+        afraid I can''t directly forward messages on your behalf. As an AI assistant,
+        I don''t have the capability to send emails from specific email addresses.
+        However, I can suggest a few alternatives:\n\n1. If you have access to the"}],"role":"assistant"}},"stopReason":"max_tokens","usage":{"inputTokens":23,"outputTokens":50,"serverToolUsage":{},"totalTokens":73}}'
+    headers:
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '434'
+      Content-Type:
+      - application/json
+      Date:
+      - Wed, 01 Apr 2026 06:17:43 GMT
+      x-amzn-RequestId:
+      - 56308014-0ead-4413-9477-591101f3869b
+    status:
+      code: 200
+      message: OK
+version: 1
