@@ -1,0 +1,63 @@
+interactions:
+- request:
+    body: '{"contents": [{"parts": [{"text": "Send the [custom_compliance.project-phoenix]
+      briefing to [PII.email] and CC the [PII.competitor_org] team."}], "role": "user"}],
+      "generationConfig": {"maxOutputTokens": 50}}'
+    headers:
+      Accept:
+      - '*/*'
+      Accept-Encoding:
+      - gzip, deflate
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '208'
+      Content-Type:
+      - application/json
+      Host:
+      - generativelanguage.googleapis.com
+      user-agent:
+      - google-genai-sdk/1.58.0 gl-python/3.10.19
+      x-goog-api-client:
+      - google-genai-sdk/1.58.0 gl-python/3.10.19
+    method: POST
+    uri: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent
+  response:
+    body:
+      string: !!binary |
+        H4sIAAAAAAAC/2VQ20rEMBB971eEPG/Fy66Ib+oWlKWtlyIFWWS0s20wzdQmBWXpv5uk22rxZQbO
+        mcs5Zx8wxt9BFaIAg5pfsheLMLb31XGkDCpjiRGyYEsSLcJrKlDyA94vxp2dUEJXjwialBuLr/LX
+        LN1EyROfZoQq8MuSxx7obd06jncaSozRgNUD01fetFQ3JqMPVDfUeT1nq+EYN2RAzqiLk8W/Nb22
+        R4X8tcj+OrJOQArz7eRmUZ5NQv392dfRru/bUUNFXVkZPZOxPA8OsQxJPWOrxRBJibUNKTw9WoU7
+        Cbry/3iLuiGl8a5wM5CsY3gTyTXe5sswuv/cpGn4EPGgD34AvnuDLbcBAAA=
+    headers:
+      Alt-Svc:
+      - h3=":443"; ma=2592000,h3-29=":443"; ma=2592000
+      Content-Encoding:
+      - gzip
+      Content-Type:
+      - application/json; charset=UTF-8
+      Date:
+      - Wed, 01 Apr 2026 07:59:37 GMT
+      Server:
+      - scaffolding on HTTPServer2
+      Server-Timing:
+      - gfet4t7; dur=1684
+      Transfer-Encoding:
+      - chunked
+      Vary:
+      - Origin
+      - X-Origin
+      - Referer
+      X-Content-Type-Options:
+      - nosniff
+      X-Frame-Options:
+      - SAMEORIGIN
+      X-Gemini-Service-Tier:
+      - standard
+      X-XSS-Protection:
+      - '0'
+    status:
+      code: 200
+      message: OK
+version: 1

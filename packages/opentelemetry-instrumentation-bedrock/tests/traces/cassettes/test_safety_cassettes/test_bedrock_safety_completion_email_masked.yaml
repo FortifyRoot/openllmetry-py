@@ -1,0 +1,48 @@
+interactions:
+- request:
+    body: '{"messages": [{"role": "user", "content": [{"text": "Create a fictional
+      contact card. The person''s name is Jane Smith, company is Widgets Inc, role
+      is VP of Sales. Invent a plausible work email and phone. Format as:\nName: ...\nEmail:
+      ...\nPhone: ..."}]}], "inferenceConfig": {"maxTokens": 100}}'
+    headers:
+      Content-Length:
+      - '295'
+      Content-Type:
+      - !!binary |
+        YXBwbGljYXRpb24vanNvbg==
+      User-Agent:
+      - !!binary |
+        Qm90bzMvMS40Mi4yOCBtZC9Cb3RvY29yZSMxLjQyLjI4IHVhLzIuMSBvcy9tYWNvcyMyNC42LjAg
+        bWQvYXJjaCN4ODZfNjQgbGFuZy9weXRob24jMy4xMC4xOSBtZC9weWltcGwjQ1B5dGhvbiBtL1os
+        ZSxiLEQgY2ZnL3JldHJ5LW1vZGUjbGVnYWN5IEJvdG9jb3JlLzEuNDIuMjg=
+      X-Amz-Date:
+      - !!binary |
+        MjAyNjA0MDFUMDYxNzM0Wg==
+      amz-sdk-invocation-id:
+      - !!binary |
+        OWU2NDc0NmQtZDE0My00ZGY0LWI5YTgtZmY2ODc0NGM4ODJi
+      amz-sdk-request:
+      - !!binary |
+        YXR0ZW1wdD0x
+    method: POST
+    uri: https://bedrock-runtime.us-east-1.amazonaws.com/model/anthropic.claude-3-haiku-20240307-v1%3A0/converse
+  response:
+    body:
+      string: '{"metrics":{"latencyMs":1040},"output":{"message":{"content":[{"text":"Name:
+        Jane Smith\nEmail: jsmith@widgets-inc.com\nPhone: (555) 123-4567\nCompany:
+        Widgets Inc.\nRole: VP of Sales"}],"role":"assistant"}},"stopReason":"end_turn","usage":{"inputTokens":60,"outputTokens":42,"serverToolUsage":{},"totalTokens":102}}'
+    headers:
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '316'
+      Content-Type:
+      - application/json
+      Date:
+      - Wed, 01 Apr 2026 06:17:36 GMT
+      x-amzn-RequestId:
+      - 9dc1df64-dd0b-4ca2-8d42-7fae9be151c6
+    status:
+      code: 200
+      message: OK
+version: 1
