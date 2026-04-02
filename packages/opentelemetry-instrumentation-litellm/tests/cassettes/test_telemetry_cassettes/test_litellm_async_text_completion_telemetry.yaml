@@ -1,0 +1,108 @@
+interactions:
+- request:
+    body: '{"messages":[{"role":"user","content":"The capital of Germany is"}],"model":"gpt-4o-mini","max_tokens":10}'
+    headers:
+      accept:
+      - application/json
+      accept-encoding:
+      - gzip, deflate
+      connection:
+      - keep-alive
+      content-length:
+      - '106'
+      content-type:
+      - application/json
+      host:
+      - api.openai.com
+      user-agent:
+      - AsyncOpenAI/Python 2.29.0
+      x-stainless-arch:
+      - x64
+      x-stainless-async:
+      - async:asyncio
+      x-stainless-lang:
+      - python
+      x-stainless-os:
+      - MacOS
+      x-stainless-package-version:
+      - 2.29.0
+      x-stainless-raw-response:
+      - 'true'
+      x-stainless-read-timeout:
+      - '600.0'
+      x-stainless-retry-count:
+      - '0'
+      x-stainless-runtime:
+      - CPython
+      x-stainless-runtime-version:
+      - 3.13.11
+    method: POST
+    uri: https://api.openai.com/v1/chat/completions
+  response:
+    body:
+      string: !!binary |
+        H4sIAAAAAAAA/6rmUlBQykxRslJQSs5ILEnOLcjRdQkossitCAAAAAD//4xS0U7CMBR95yuWPjMy
+        cDB4VROeTUw0GrKU9m4rdm3T26nE8O+2G7ChmPjSZPfcc3buuZffV8nzXfbwtN5+7NI1QiFXixcy
+        Dgy93QFzJ9aEac8DJ7TqYGaBOgiq0yybJ/N0maYtUGsOMtBK4+JUx7VQIp4lszROsni6PLIrLRig
+        b3v1n1H01b7Bp+Lw6cvJ+FSpAZGW4GunJl+0WoYKoYgCHVWOjHuQaeVAtdYfK4gYNcJRGekiWoOt
+        qdpHAqNbsFKoyZBnoWiQBu+qkXIAUKW0o2H21vHmiBzOHqUujdVb/EElhZ8dq9xHhT437wedNqRF
+        D/7dtFk0F+MRL1Qblzv9Bu3vprNOjvQb6MHsiDnvTw44q/EVsZyDo0LiIErCKKuA98w+d9pwoQfA
+        aDDyby/XtLuxhSr/I98DjIHxl5UbC1ywy3n7NgvhPP9qO0fcGiYI9t3fW+4E2LAGDgVtZHc0BPfo
+        oM79rkqwxorucgqTs9XNIp3zIluQ0WH0DQAA//8DACK6jW1HAwAA
+    headers:
+      Access-Control-Expose-Headers:
+      - X-Request-ID
+      CF-Cache-Status:
+      - DYNAMIC
+      CF-Ray:
+      - 9e58638a3f7cc1f7-BLR
+      Connection:
+      - keep-alive
+      Content-Encoding:
+      - gzip
+      Content-Type:
+      - application/json
+      Date:
+      - Wed, 01 Apr 2026 14:47:25 GMT
+      Server:
+      - cloudflare
+      Set-Cookie:
+      - __cf_bm=ifLoR.uXnbHcwN4ZF2c86AH8yATN7kMowjCIdqd6qGk-1775054844.517069-1.0.1.1-U7J_GSzz.vQGcMSxjwaNFIhRH5wgzI3NsPPrV8audqWVIxKac1KWRraWyhdcItuApU3v3tu4sP.zIN4V_VtnKYvgUGHJ2xBS64N8LztAUjaDdYmPUJKtpn2rdPRfWmNG;
+        HttpOnly; Secure; Path=/; Domain=api.openai.com; Expires=Wed, 01 Apr 2026
+        15:17:25 GMT
+      Strict-Transport-Security:
+      - max-age=31536000; includeSubDomains; preload
+      Transfer-Encoding:
+      - chunked
+      X-Content-Type-Options:
+      - nosniff
+      alt-svc:
+      - h3=":443"; ma=86400
+      openai-organization:
+      - personal-test-clou2a
+      openai-processing-ms:
+      - '608'
+      openai-project:
+      - proj_5zhcB7xbj7xhoXUDTAPm4WiB
+      openai-version:
+      - '2020-10-01'
+      x-openai-proxy-wasm:
+      - v0.1
+      x-ratelimit-limit-requests:
+      - '10000'
+      x-ratelimit-limit-tokens:
+      - '200000'
+      x-ratelimit-remaining-requests:
+      - '9994'
+      x-ratelimit-remaining-tokens:
+      - '199991'
+      x-ratelimit-reset-requests:
+      - 44.132s
+      x-ratelimit-reset-tokens:
+      - 2ms
+      x-request-id:
+      - req_e47704bcc6c847afa2cc5b508f061a41
+    status:
+      code: 200
+      message: OK
+version: 1

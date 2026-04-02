@@ -94,6 +94,10 @@ class SpanHolder:
     token: Optional[Any] = None
     context: Optional[context_api.context.Context] = None
     waiting_for_streaming: bool = field(init=False, default=False)
+    # FR: True when the underlying LLM class has its own OpenLLMetry instrumentor
+    # (e.g. OpenAI).  Event handlers should skip setting LLM-specific attributes
+    # on this span since the provider instrumentor sets them on its own child span.
+    delegates_to_provider: bool = field(init=False, default=False)
 
     _active: bool = field(init=False, default=True)
 
@@ -128,39 +132,46 @@ class SpanHolder:
 
     @update_span_for_event.register
     def _(self, event: LLMChatStartEvent):
-        set_llm_chat_request_model_attributes(event, self.otel_span)
-        if should_emit_events():
-            emit_chat_message_events(event)
-        else:
-            set_llm_chat_request(event, self.otel_span)
+        # FR: skip LLM attribute-setting when provider instrumentor handles it
+        if not self.delegates_to_provider:
+            set_llm_chat_request_model_attributes(event, self.otel_span)
+            if should_emit_events():
+                emit_chat_message_events(event)
+            else:
+                set_llm_chat_request(event, self.otel_span)
 
     @update_span_for_event.register
     def _(self, event: LLMChatEndEvent):
-        # FR: when streaming, per-chunk safety already ran and emitted findings;
-        # skip here to avoid duplicate span events on the assembled response.
-        if not self.waiting_for_streaming:
-            apply_chat_end_safety(event, self.otel_span)
-        set_llm_chat_response_model_attributes(event, self.otel_span)
-        if should_emit_events():
-            emit_chat_response_events(event)
-        else:
-            set_llm_chat_response(event, self.otel_span)  # noqa: F821
+        # FR: skip LLM attribute-setting when provider instrumentor handles it
+        if not self.delegates_to_provider:
+            # FR: when streaming, per-chunk safety already ran and emitted findings;
+            # skip here to avoid duplicate span events on the assembled response.
+            if not self.waiting_for_streaming:
+                apply_chat_end_safety(event, self.otel_span)
+            set_llm_chat_response_model_attributes(event, self.otel_span)
+            if should_emit_events():
+                emit_chat_response_events(event)
+            else:
+                set_llm_chat_response(event, self.otel_span)  # noqa: F821
 
     @update_span_for_event.register
     def _(self, event: LLMCompletionStartEvent):
-        apply_completion_start_span_attributes(event, self.otel_span)
+        if not self.delegates_to_provider:
+            apply_completion_start_span_attributes(event, self.otel_span)
 
     @update_span_for_event.register
     def _(self, event: LLMCompletionEndEvent):
-        # FR: same as LLMChatEndEvent -- skip when streaming safety is active.
-        if not self.waiting_for_streaming:
-            apply_completion_end_safety(event, self.otel_span)
+        if not self.delegates_to_provider:
+            # FR: same as LLMChatEndEvent -- skip when streaming safety is active.
+            if not self.waiting_for_streaming:
+                apply_completion_end_safety(event, self.otel_span)
 
     @update_span_for_event.register
     def _(self, event: LLMPredictEndEvent):
-        apply_predict_end_safety(event, self.otel_span)
-        if not should_emit_events():
-            set_llm_predict_response(event, self.otel_span)
+        if not self.delegates_to_provider:
+            apply_predict_end_safety(event, self.otel_span)
+            if not should_emit_events():
+                set_llm_predict_response(event, self.otel_span)
 
     @update_span_for_event.register
     def _(self, event: EmbeddingStartEvent):
@@ -205,13 +216,13 @@ class OpenLLMetrySpanHandler(BaseSpanHandler[SpanHolder]):
 
         parent = self.open_spans.get(parent_span_id)
 
-        if class_name in AVAILABLE_OPENLLMETRY_INSTRUMENTATIONS:
-            token = context_api.attach(
-                context_api.set_value(
-                    SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY, False
-                )
-            )
-            return SpanHolder(id_, parent, token=token)
+        # FR: always create a span, even for OpenLLMetry-instrumented classes.
+        # Previously this returned early for OpenAI (no span created), which
+        # meant safety findings from the pre-wrapper had no valid span to be
+        # emitted on.  Now we create a LlamaIndex task/workflow span and set
+        # SUPPRESS=False so the provider instrumentor still creates its own
+        # child span with full enrichment (tokens, cost, etc.).
+        is_openllmetry_class = class_name in AVAILABLE_OPENLLMETRY_INSTRUMENTATIONS
 
         kind = (
             TraceloopSpanKindValues.TASK.value
@@ -235,12 +246,18 @@ class OpenLLMetrySpanHandler(BaseSpanHandler[SpanHolder]):
         current_context = set_span_in_context(
             span, context=parent.context if parent else None
         )
+        # FR: for OpenLLMetry classes, set SUPPRESS=False so the provider
+        # instrumentor (OpenAI, etc.) still runs and creates its child span.
         current_context = context_api.set_value(
             SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY,
-            True,
+            not is_openllmetry_class,
             current_context,
         )
         token = context_api.attach(current_context)
+
+        # FR: emit deferred prompt safety findings now that the span exists
+        from opentelemetry.instrumentation.fortifyroot import emit_deferred_findings
+        emit_deferred_findings(span)
 
         span.set_attribute(SpanAttributes.TRACELOOP_SPAN_KIND, kind)
         span.set_attribute(SpanAttributes.TRACELOOP_ENTITY_NAME, span_name)
@@ -267,7 +284,9 @@ class OpenLLMetrySpanHandler(BaseSpanHandler[SpanHolder]):
             except Exception:
                 pass
 
-        return SpanHolder(id_, parent, span, token, current_context)
+        holder = SpanHolder(id_, parent, span, token, current_context)
+        holder.delegates_to_provider = is_openllmetry_class
+        return holder
 
     def prepare_to_exit_span(
         self,

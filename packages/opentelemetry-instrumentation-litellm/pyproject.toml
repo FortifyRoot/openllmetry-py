@@ -36,8 +36,10 @@ test = [
   "litellm>=1.71.2,<2,!=1.82.7,!=1.82.8",
   "opentelemetry-sdk>=1.38.0,<2",
   "pytest-asyncio>=0.23.7,<0.24.0",
+  "pytest-recording>=0.13.2,<0.14.0",
   "pytest-sugar==1.0.0",
   "pytest>=8.2.2,<9",
+  "vcrpy>=8.0.0,<9",
 ]
 
 [build-system]
@@ -72,6 +74,7 @@ select = ["E", "F", "W"]
 [tool.pytest.ini_options]
 markers = [
   "fr: FortifyRoot-owned regression tests",
+  "vcr: VCR cassette tests",
 ]
 
 [tool.uv]

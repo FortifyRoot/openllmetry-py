@@ -1,0 +1,109 @@
+interactions:
+- request:
+    body: '{"messages":[{"role":"user","content":"Verify payment for card 4111 1111
+      1111 1111 was received."}],"model":"gpt-4o-mini","max_tokens":50}'
+    headers:
+      Accept:
+      - application/json
+      Accept-Encoding:
+      - gzip, deflate
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '138'
+      Content-Type:
+      - application/json
+      Cookie:
+      - __cf_bm=hGx6nb_Kp7BQbCoU40X0qfiITLoIHk6Ii0_9jqguPzM-1775054835.903716-1.0.1.1-_AVEI6KG4YKPaY4IfBXqNjMZgWh.am66tPdYw48Zp2msB8GpBZh_ROXWIkbQTs0KPiRdPjG42aEdBIFNrcjn40PGz_YOQeUbLK.4Iun8LoRZ88gYfchTzwm8W4PrxJKg
+      Host:
+      - api.openai.com
+      User-Agent:
+      - OpenAI/Python 2.29.0
+      X-Stainless-Arch:
+      - x64
+      X-Stainless-Async:
+      - 'false'
+      X-Stainless-Lang:
+      - python
+      X-Stainless-OS:
+      - MacOS
+      X-Stainless-Package-Version:
+      - 2.29.0
+      X-Stainless-Raw-Response:
+      - 'true'
+      X-Stainless-Runtime:
+      - CPython
+      X-Stainless-Runtime-Version:
+      - 3.13.11
+      x-stainless-read-timeout:
+      - '600.0'
+      x-stainless-retry-count:
+      - '0'
+    method: POST
+    uri: https://api.openai.com/v1/chat/completions
+  response:
+    body:
+      string: !!binary |
+        H4sIAAAAAAAA/6rmUlBQykxRslJQSs5ILEnOLcjRdQkosjQJdwEAAAD//4xTTY/aMBC98yssX/YC
+        K2D56rGXShxWas/VKjL2hEzXsVPPhEIr/nvHCRC23Uq9RMq8eW/efPi0PXxc7HB9nG5+wvMXSN8/
+        zZ+PepwZcfcNLF9ZjzYKDxhj6GGbwDBk1dl6vZwuF5vVvAPq6MBn2r7hySJOagw4mU/ni8l0PZlt
+        LuwqogWStK/yq9Sv7pt9BgdHCU/H10gNRGYPErsmSTBFnyPaECGxCazHA2hjYAid9e1DrSimdBqr
+        Xctqq6wJD6x6mvqBXClbgX3FsFeNOdVCU6LHLQGpmFRlgvMZJAiEjAdQGMqYapMnoai1lYgpGYZD
+        FvHklAM26OlRffZgCFR2YyyrU2zTrUaT4gEdpFyjxGCCReNFmhi57aSliLp2Z6G3emUfIGGJtvPw
+        eN95grIlk6cfWu/vABNC5C6/m/nLBTnfpuzjXjzt6A+qFnNIVSHLJtm8TJQ4NrpDz/J96bbZvlmQ
+        FqG64YLjK3Tl5qteTg83NIBPywvIYtAP8dVs/I5acZnu3TVoa2SFbmAOp2Nah/EOGN31/LeZ97T7
+        vuUA/kd+AKyFRh5H0eS7sG8bHtIS5Bf2r7TbjDvDmiAd5MkUjJDyHhyUpvX93Ws6EUNdyLL2kJqE
+        /fGXTWE/PK0WS1euV3p0Hv0GAAD//wMAaLvuwwoEAAA=
+    headers:
+      CF-Cache-Status:
+      - DYNAMIC
+      CF-Ray:
+      - 9e5863fad83f20c5-BLR
+      Connection:
+      - keep-alive
+      Content-Encoding:
+      - gzip
+      Content-Type:
+      - application/json
+      Date:
+      - Wed, 01 Apr 2026 14:47:43 GMT
+      Server:
+      - cloudflare
+      Strict-Transport-Security:
+      - max-age=31536000; includeSubDomains; preload
+      Transfer-Encoding:
+      - chunked
+      X-Content-Type-Options:
+      - nosniff
+      access-control-expose-headers:
+      - X-Request-ID
+      alt-svc:
+      - h3=":443"; ma=86400
+      openai-organization:
+      - personal-test-clou2a
+      openai-processing-ms:
+      - '1098'
+      openai-project:
+      - proj_5zhcB7xbj7xhoXUDTAPm4WiB
+      openai-version:
+      - '2020-10-01'
+      x-openai-proxy-wasm:
+      - v0.1
+      x-ratelimit-limit-requests:
+      - '10000'
+      x-ratelimit-limit-tokens:
+      - '200000'
+      x-ratelimit-remaining-requests:
+      - '9985'
+      x-ratelimit-remaining-tokens:
+      - '199983'
+      x-ratelimit-reset-requests:
+      - 2m1.15s
+      x-ratelimit-reset-tokens:
+      - 5ms
+      x-request-id:
+      - req_474b4fe6bdba4f3ca0c2b941838124e4
+    status:
+      code: 200
+      message: OK
+version: 1

@@ -1,0 +1,110 @@
+interactions:
+- request:
+    body: '{"messages":[{"role":"user","content":"Compare our product roadmap with
+      [PII.competitor_org]''s latest offering and [PII.competitor_org]'' pricing strategy."}],"model":"gpt-4o-mini","max_tokens":50}'
+    headers:
+      Accept:
+      - application/json
+      Accept-Encoding:
+      - gzip, deflate
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '196'
+      Content-Type:
+      - application/json
+      Cookie:
+      - __cf_bm=hGx6nb_Kp7BQbCoU40X0qfiITLoIHk6Ii0_9jqguPzM-1775054835.903716-1.0.1.1-_AVEI6KG4YKPaY4IfBXqNjMZgWh.am66tPdYw48Zp2msB8GpBZh_ROXWIkbQTs0KPiRdPjG42aEdBIFNrcjn40PGz_YOQeUbLK.4Iun8LoRZ88gYfchTzwm8W4PrxJKg
+      Host:
+      - api.openai.com
+      User-Agent:
+      - OpenAI/Python 2.29.0
+      X-Stainless-Arch:
+      - x64
+      X-Stainless-Async:
+      - 'false'
+      X-Stainless-Lang:
+      - python
+      X-Stainless-OS:
+      - MacOS
+      X-Stainless-Package-Version:
+      - 2.29.0
+      X-Stainless-Raw-Response:
+      - 'true'
+      X-Stainless-Runtime:
+      - CPython
+      X-Stainless-Runtime-Version:
+      - 3.13.11
+      x-stainless-read-timeout:
+      - '600.0'
+      x-stainless-retry-count:
+      - '0'
+    method: POST
+    uri: https://api.openai.com/v1/chat/completions
+  response:
+    body:
+      string: !!binary |
+        H4sIAAAAAAAA/6rmUlBQykxRslJQSs5ILEnOLcjRdQkosigLKAAAAAD//4xTTY/TMBC9768Y5bIg
+        tatu22zLfUFEgNgbB7SKHGeSGhxPZE9SItT/zjhtNy0fEpdImTfvzccbv11+6Ll//KTTpnhc4ed3
+        +stHMsksMqj4hprPrDtNwkM25I6w9qgYo+r9ZpMu0vU2XY1AQyXaSKtbnq9p3hhn5svFcj1fbOb3
+        2xN7R0ZjkLSv8gvwc/zGPl2JPyS8mJ0jDYagapTYOUmCnmyMJCoEE1g5TmYTqMkxurH17LaBQN4P
+        Myg6hgy0crcMrafelAihRW0qoyFOp7wJ5AKQB+WUHQIGMK4n2xtXR0rrDbLyQ8yQGpUoODbKSlZF
+        vlFxOaAKkkLXws7gKCsaZac5zIShbVdG3acsg1dP6KW0snaAbBStjCosQjYJv76D97THHv3sOAbs
+        0LYwUAd7wzuo0aGXXgJ78aUeK0oO7YEJZE2yRVDnDsCTKhvVgqqVcYEFiY2KvUz+cpUeqy6oaKfr
+        rL0AlHPEY2Ojic8n5PBim6VaihXhN2pSyTmEXS7XIxNHiyy6mnfJiB/k+zweSHfleSJSTcs503cc
+        C67So2AyneUEpqfjSVhatFN8eyZdqeWlmGpsuDiwRCu9w3JiTteoxDW6AG4upv6zmb9pHycX6/9H
+        fgK0xlbeW956LI2+HnhK8xgf7b/SXnY8NpwE9L28wpwN+uhEiZXq7PEpJWEIjE0udtXo5fKP76lq
+        c/1m9bBOy2rzkNwcbn4BAAD//wMAFyApJV0EAAA=
+    headers:
+      CF-Cache-Status:
+      - DYNAMIC
+      CF-Ray:
+      - 9e5863c0e8bca9c3-BLR
+      Connection:
+      - keep-alive
+      Content-Encoding:
+      - gzip
+      Content-Type:
+      - application/json
+      Date:
+      - Wed, 01 Apr 2026 14:47:35 GMT
+      Server:
+      - cloudflare
+      Strict-Transport-Security:
+      - max-age=31536000; includeSubDomains; preload
+      Transfer-Encoding:
+      - chunked
+      X-Content-Type-Options:
+      - nosniff
+      access-control-expose-headers:
+      - X-Request-ID
+      alt-svc:
+      - h3=":443"; ma=86400
+      openai-organization:
+      - personal-test-clou2a
+      openai-processing-ms:
+      - '1674'
+      openai-project:
+      - proj_5zhcB7xbj7xhoXUDTAPm4WiB
+      openai-version:
+      - '2020-10-01'
+      x-openai-proxy-wasm:
+      - v0.1
+      x-ratelimit-limit-requests:
+      - '10000'
+      x-ratelimit-limit-tokens:
+      - '200000'
+      x-ratelimit-remaining-requests:
+      - '9990'
+      x-ratelimit-remaining-tokens:
+      - '199969'
+      x-ratelimit-reset-requests:
+      - 1m18.589s
+      x-ratelimit-reset-tokens:
+      - 9ms
+      x-request-id:
+      - req_f8827d73c8604cae94602cfceaae8ee5
+    status:
+      code: 200
+      message: OK
+version: 1

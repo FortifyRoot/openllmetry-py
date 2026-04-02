@@ -36,6 +36,10 @@ except Exception:  # pragma: no cover
 PROVIDER = "LlamaIndex"
 _WRAPPERS_INSTALLED = False
 _WRAPPERS_LOCK = threading.Lock()
+# FR: re-entrancy guard for nested wrapper calls (BaseLLM → subclass chain).
+# Only the outermost wrapper should clear the deferred buffer.
+_safety_active = threading.local()
+
 _METHODS = (
     "chat", "achat", "complete", "acomplete",
     # FR: streaming safety -- per-chunk holdback for streaming LLM calls
@@ -81,28 +85,64 @@ def uninstrument_llm_safety_wrappers():
         _WRAPPERS_INSTALLED = False
 
 
+def _enter_safety():
+    """Mark outermost safety wrapper entry; clear buffer only on first entry."""
+    if getattr(_safety_active, "depth", 0) == 0:
+        from opentelemetry.instrumentation.fortifyroot import discard_deferred_findings
+        discard_deferred_findings()
+    _safety_active.depth = getattr(_safety_active, "depth", 0) + 1
+
+
+def _exit_safety():
+    _safety_active.depth = max(0, getattr(_safety_active, "depth", 0) - 1)
+
+
 def llm_chat_wrapper(wrapped, instance, args, kwargs):
-    updated_args, updated_kwargs = _apply_chat_prompt_safety(instance, args, kwargs)
-    return wrapped(*updated_args, **updated_kwargs)
+    _enter_safety()
+    try:
+        updated_args, updated_kwargs = _apply_chat_prompt_safety(instance, args, kwargs)
+        return wrapped(*updated_args, **updated_kwargs)
+    finally:
+        _exit_safety()
 
 
 async def llm_achat_wrapper(wrapped, instance, args, kwargs):
-    updated_args, updated_kwargs = await asyncio.to_thread(  # FR: async safety
-        _apply_chat_prompt_safety, instance, args, kwargs
-    )
-    return await wrapped(*updated_args, **updated_kwargs)
+    from opentelemetry.instrumentation.fortifyroot import drain_deferred_findings, inject_deferred_findings
+    _enter_safety()
+    try:
+        def _safety_on_worker():
+            result = _apply_chat_prompt_safety(instance, args, kwargs)
+            return result, drain_deferred_findings()
+
+        (updated_args, updated_kwargs), worker_findings = await asyncio.to_thread(_safety_on_worker)
+        inject_deferred_findings(worker_findings)
+        return await wrapped(*updated_args, **updated_kwargs)
+    finally:
+        _exit_safety()
 
 
 def llm_complete_wrapper(wrapped, instance, args, kwargs):
-    updated_args, updated_kwargs = _apply_completion_prompt_safety(instance, args, kwargs)
-    return wrapped(*updated_args, **updated_kwargs)
+    _enter_safety()
+    try:
+        updated_args, updated_kwargs = _apply_completion_prompt_safety(instance, args, kwargs)
+        return wrapped(*updated_args, **updated_kwargs)
+    finally:
+        _exit_safety()
 
 
 async def llm_acomplete_wrapper(wrapped, instance, args, kwargs):
-    updated_args, updated_kwargs = await asyncio.to_thread(  # FR: async safety
-        _apply_completion_prompt_safety, instance, args, kwargs
-    )
-    return await wrapped(*updated_args, **updated_kwargs)
+    from opentelemetry.instrumentation.fortifyroot import drain_deferred_findings, inject_deferred_findings
+    _enter_safety()
+    try:
+        def _safety_on_worker():
+            result = _apply_completion_prompt_safety(instance, args, kwargs)
+            return result, drain_deferred_findings()
+
+        (updated_args, updated_kwargs), worker_findings = await asyncio.to_thread(_safety_on_worker)
+        inject_deferred_findings(worker_findings)
+        return await wrapped(*updated_args, **updated_kwargs)
+    finally:
+        _exit_safety()
 
 
 def llm_stream_chat_wrapper(wrapped, instance, args, kwargs):  # FR: streaming safety
@@ -110,7 +150,15 @@ def llm_stream_chat_wrapper(wrapped, instance, args, kwargs):  # FR: streaming s
         LlamaIndexStreamingSafety,
         wrap_stream,
     )
-    updated_args, updated_kwargs = _apply_chat_prompt_safety(instance, args, kwargs)
+    _enter_safety()
+    try:
+        updated_args, updated_kwargs = _apply_chat_prompt_safety(instance, args, kwargs)
+    except Exception:
+        _exit_safety()
+        raise
+    # NOTE: _exit_safety NOT called here — the generator from wrap_stream may
+    # outlive this call frame.  The depth counter stays +1 during iteration,
+    # which is harmless (prevents spurious clears during nested calls).
     span = trace.get_current_span()
     span_name = f"{instance.__class__.__name__}.stream_chat"
     safety = LlamaIndexStreamingSafety(span, span_name, LLMRequestTypeValues.CHAT.value)
@@ -123,11 +171,21 @@ async def llm_astream_chat_wrapper(wrapped, instance, args, kwargs):  # FR: stre
         LlamaIndexStreamingSafety,
         make_async_stream,
     )
-    span = trace.get_current_span()  # capture eagerly before any await
-    span_name = f"{instance.__class__.__name__}.astream_chat"
-    updated_args, updated_kwargs = await asyncio.to_thread(
-        _apply_chat_prompt_safety, instance, args, kwargs
-    )
+    from opentelemetry.instrumentation.fortifyroot import drain_deferred_findings, inject_deferred_findings
+    _enter_safety()
+    try:
+        span = trace.get_current_span()  # capture eagerly before any await
+        span_name = f"{instance.__class__.__name__}.astream_chat"
+
+        def _safety_on_worker():
+            result = _apply_chat_prompt_safety(instance, args, kwargs)
+            return result, drain_deferred_findings()
+
+        (updated_args, updated_kwargs), worker_findings = await asyncio.to_thread(_safety_on_worker)
+        inject_deferred_findings(worker_findings)
+    except Exception:
+        _exit_safety()
+        raise
     result = wrapped(*updated_args, **updated_kwargs)
     if _inspect.iscoroutine(result):  # coroutine returning async gen (standard LI pattern)
         result = await result
@@ -140,7 +198,12 @@ def llm_stream_complete_wrapper(wrapped, instance, args, kwargs):  # FR: streami
         LlamaIndexStreamingSafety,
         wrap_stream,
     )
-    updated_args, updated_kwargs = _apply_completion_prompt_safety(instance, args, kwargs)
+    _enter_safety()
+    try:
+        updated_args, updated_kwargs = _apply_completion_prompt_safety(instance, args, kwargs)
+    except Exception:
+        _exit_safety()
+        raise
     span = trace.get_current_span()
     span_name = f"{instance.__class__.__name__}.stream_complete"
     safety = LlamaIndexStreamingSafety(span, span_name, LLMRequestTypeValues.COMPLETION.value)
@@ -153,11 +216,21 @@ async def llm_astream_complete_wrapper(wrapped, instance, args, kwargs):  # FR: 
         LlamaIndexStreamingSafety,
         make_async_stream,
     )
-    span = trace.get_current_span()  # capture eagerly before any await
-    span_name = f"{instance.__class__.__name__}.astream_complete"
-    updated_args, updated_kwargs = await asyncio.to_thread(
-        _apply_completion_prompt_safety, instance, args, kwargs
-    )
+    from opentelemetry.instrumentation.fortifyroot import drain_deferred_findings, inject_deferred_findings
+    _enter_safety()
+    try:
+        span = trace.get_current_span()  # capture eagerly before any await
+        span_name = f"{instance.__class__.__name__}.astream_complete"
+
+        def _safety_on_worker():
+            result = _apply_completion_prompt_safety(instance, args, kwargs)
+            return result, drain_deferred_findings()
+
+        (updated_args, updated_kwargs), worker_findings = await asyncio.to_thread(_safety_on_worker)
+        inject_deferred_findings(worker_findings)
+    except Exception:
+        _exit_safety()
+        raise
     result = wrapped(*updated_args, **updated_kwargs)
     if _inspect.iscoroutine(result):
         result = await result
