@@ -1,0 +1,1212 @@
+interactions:
+- request:
+    body: '{"messages":[{"role":"user","content":"Create a fictional contact card.
+      The person''s name is Jane Smith, company is Widgets Inc, role is VP of Sales.
+      Invent a plausible work email and phone. Format as:\nName: ...\nEmail: ...\nPhone:
+      ..."}],"model":"gpt-4o-mini","max_tokens":50,"stream":false,"temperature":0.1}'
+    headers:
+      Accept:
+      - application/json
+      Accept-Encoding:
+      - gzip, deflate
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '311'
+      Content-Type:
+      - application/json
+      Host:
+      - api.openai.com
+      User-Agent:
+      - OpenAI/Python 1.109.1
+      X-Stainless-Arch:
+      - x64
+      X-Stainless-Async:
+      - 'false'
+      X-Stainless-Lang:
+      - python
+      X-Stainless-OS:
+      - MacOS
+      X-Stainless-Package-Version:
+      - 1.109.1
+      X-Stainless-Runtime:
+      - CPython
+      X-Stainless-Runtime-Version:
+      - 3.12.6
+      traceparent:
+      - 00-64c281a31d93c9ce263107a8f09365d9-179136d4418e6083-01
+      x-stainless-read-timeout:
+      - '60.0'
+      x-stainless-retry-count:
+      - '0'
+    method: POST
+    uri: https://api.openai.com/v1/chat/completions
+  response:
+    body:
+      string: !!binary |
+        H4sIAAAAAAAA/6rmUlBQykxRslJQSs5ILEnOLcjRdQko8gpLcgIAAAD//4xTTW+cMBC976+wfGqk
+        JWI/WDZ7qlL1kB6qbSMlhzRCXjOAU2NTj2kTVfvfMwY2kDaVekFi3rzHmzdDaXEPW703l4dH9eXy
+        xhRQ/fB8Hhj28ADSn1jn0hIPvLKmh6UD4SGoLtI0iZMkiS86oLY56EArGx+tbVQro6JlvFxHcRot
+        tgO7skoCUtsdvTL2u3sGnyaHRyrH81OlBkRRAtVOTVR0VocKF4gKvTC95wGU1ngwnfXPooYd+yQM
+        sOta+Yqxb+YDTSLM047dqrwEj+zKyFD/Spo7drNntmDXQgOG4sdaKL1jD6RwjkHh/a+epYwMmYSe
+        fWUNMd9RBmdssVxF62STko+JJQdFiyLEYlqtJ4AwxnoRYu3CuB+Q48v42paNswf8g8oLihWrjLaA
+        tBIaFb1teIce6Xnfxdy+So6TUN34zNvv0H0uWfRyfFzuCK7SAfRkUI/17Xb+hlqWg6ekcLImLoWs
+        IB+Z405Fmys7AWaTmf8285Z2P7cy5f/Ij4CU0NDVZo2DXMnXA49tDsLp/6vtJePOMEdwP+mWM6/A
+        hT3kUIhWDz8RPqGHOqNlleAap/qrLJpMXqw26yQv0g2fHWfPAAAA//8DAJWBFBKjAwAA
+    headers:
+      CF-Cache-Status:
+      - DYNAMIC
+      CF-Ray:
+      - 9e5873c75b4c0989-BLR
+      Connection:
+      - keep-alive
+      Content-Encoding:
+      - gzip
+      Content-Type:
+      - application/json
+      Date:
+      - Wed, 01 Apr 2026 14:58:31 GMT
+      Server:
+      - cloudflare
+      Strict-Transport-Security:
+      - max-age=31536000; includeSubDomains; preload
+      Transfer-Encoding:
+      - chunked
+      X-Content-Type-Options:
+      - nosniff
+      access-control-expose-headers:
+      - X-Request-ID
+      alt-svc:
+      - h3=":443"; ma=86400
+      openai-organization:
+      - personal-test-clou2a
+      openai-processing-ms:
+      - '1226'
+      openai-project:
+      - proj_5zhcB7xbj7xhoXUDTAPm4WiB
+      openai-version:
+      - '2020-10-01'
+      set-cookie:
+      - __cf_bm=Da9fcUHdrR3h96fNrM7YDLRAnrBdJCdn_76UoKQgIGw-1775055509.65123-1.0.1.1-85gtHGiJFXPknAC7WWPG_73jG2.15U8W.mrwAhROiua0ibSbcWglBB0cpfF_Jtsew88lflcKBTeZCzhj2B9N5E.UD_.eekQQ.yZ7ZCERfqqMQGDkFpM_1FEvjhwF6rJq;
+        HttpOnly; Secure; Path=/; Domain=api.openai.com; Expires=Wed, 01 Apr 2026
+        15:28:31 GMT
+      x-openai-proxy-wasm:
+      - v0.1
+      x-ratelimit-limit-requests:
+      - '10000'
+      x-ratelimit-limit-tokens:
+      - '200000'
+      x-ratelimit-remaining-requests:
+      - '9992'
+      x-ratelimit-remaining-tokens:
+      - '199949'
+      x-ratelimit-reset-requests:
+      - 1m2.791s
+      x-ratelimit-reset-tokens:
+      - 15ms
+      x-request-id:
+      - req_3659202dffc84cbfa288cc63f8a87d60
+    status:
+      code: 200
+      message: OK
+- request:
+    body: '{"messages":[{"role":"user","content":"Create a fictional contact card.
+      The person''s name is Jane Smith, company is Widgets Inc, role is VP of Sales.
+      Invent a plausible work email and phone. Format as:\nName: ...\nEmail: ...\nPhone:
+      ..."}],"model":"gpt-4o-mini","max_tokens":50,"stream":false,"temperature":0.1}'
+    headers:
+      Accept:
+      - application/json
+      Accept-Encoding:
+      - gzip, deflate
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '311'
+      Content-Type:
+      - application/json
+      Host:
+      - api.openai.com
+      User-Agent:
+      - OpenAI/Python 1.109.1
+      X-Stainless-Arch:
+      - x64
+      X-Stainless-Async:
+      - 'false'
+      X-Stainless-Lang:
+      - python
+      X-Stainless-OS:
+      - MacOS
+      X-Stainless-Package-Version:
+      - 1.109.1
+      X-Stainless-Runtime:
+      - CPython
+      X-Stainless-Runtime-Version:
+      - 3.12.6
+      traceparent:
+      - 00-6599db2dbdae6cb154c4ae1cc35e2b33-9ad77b7a3834f741-01
+      x-stainless-read-timeout:
+      - '60.0'
+      x-stainless-retry-count:
+      - '0'
+    method: POST
+    uri: https://api.openai.com/v1/chat/completions
+  response:
+    body:
+      string: !!binary |
+        H4sIAAAAAAAA/6rmUlBQykxRslJQSs5ILEnOLcjRdQkoSi8xTQcAAAD//4xSTW+bQBC9+1es9pRK
+        JsIfgO1TJCtK20Pl1lJ7aCO0WQbYFHbpztI6qvzfOwt2IE0i5bIS7817zLwZdb095PrzLvy1jdvt
+        en9IblbvkU+9wtzdg3Rn1aU0pAOnjO5paUE48K6zJInCKF5H646oTQaVlxWNC5YmqJVWwTycL4Mw
+        CWark7o0SgJS2Xf6ZOxv9/o+dQYHgsPpGakBURRA2LmIQGsqj3CBqNAJ7fh0IKXRDnTX+idRw4Z9
+        FBrYvlauZOyH3tIkQj9s2DeVFeCQfdDS41/Ic8O+7pjJ2V5UgB68roWqNuyeHC7RO1z96VVKS5+J
+        r9mVRpPyIoqid2w2XwTLKE6oj1FLFvIWhY9Ft1U1IoTWxgkfaxfG7Yk5Po5fmaKx5g7/k/KcYsUy
+        pS0grYRGRWca3rFHem+7mNsnyXEyqhuXOvMTut9Fs96OD8sdyEVyIh01WA34ajV9wS3NwFFSOFoT
+        l0KWkA3KYaeizZQZEZPRzM+becm7n1vp4i32AyElNHS1aWMhU/LpwEOZBX/6r5U9Ztw1zBHsb7rl
+        1Cmwfg8Z5KKt+oPk+IAO6pSWVYBtrOqvMm9SuV7EyyjLk5hPjpN/AAAA//8DAPqDiJSjAwAA
+    headers:
+      CF-Cache-Status:
+      - DYNAMIC
+      CF-Ray:
+      - 9e58972d6c4490cd-BLR
+      Connection:
+      - keep-alive
+      Content-Encoding:
+      - gzip
+      Content-Type:
+      - application/json
+      Date:
+      - Wed, 01 Apr 2026 15:22:41 GMT
+      Server:
+      - cloudflare
+      Strict-Transport-Security:
+      - max-age=31536000; includeSubDomains; preload
+      Transfer-Encoding:
+      - chunked
+      X-Content-Type-Options:
+      - nosniff
+      access-control-expose-headers:
+      - X-Request-ID
+      alt-svc:
+      - h3=":443"; ma=86400
+      openai-organization:
+      - personal-test-clou2a
+      openai-processing-ms:
+      - '1587'
+      openai-project:
+      - proj_5zhcB7xbj7xhoXUDTAPm4WiB
+      openai-version:
+      - '2020-10-01'
+      set-cookie:
+      - __cf_bm=VBJbiJHasSAtzPMEOqLx2tl81Umq8lI74JdQmh23gkc-1775056959.5867093-1.0.1.1-VxeBGHXRmH.3CcTYqql5_cyBuoYCmv.pyX8GajUvWolQ0ZPfzT5R5X_6VfCVyOzVMXn2.vPtmEu.0ynDokUy1miZjJgWw2caEP8iVUfi6kcGkIJuZgRxB8sdYI4OWiM6;
+        HttpOnly; Secure; Path=/; Domain=api.openai.com; Expires=Wed, 01 Apr 2026
+        15:52:41 GMT
+      x-openai-proxy-wasm:
+      - v0.1
+      x-ratelimit-limit-requests:
+      - '10000'
+      x-ratelimit-limit-tokens:
+      - '200000'
+      x-ratelimit-remaining-requests:
+      - '9993'
+      x-ratelimit-remaining-tokens:
+      - '199949'
+      x-ratelimit-reset-requests:
+      - 57.868s
+      x-ratelimit-reset-tokens:
+      - 15ms
+      x-request-id:
+      - req_541debbaa7484b8a93947821cf527d60
+    status:
+      code: 200
+      message: OK
+- request:
+    body: '{"messages":[{"role":"user","content":"Create a fictional contact card.
+      The person''s name is Jane Smith, company is Widgets Inc, role is VP of Sales.
+      Invent a plausible work email and phone. Format as:\nName: ...\nEmail: ...\nPhone:
+      ..."}],"model":"gpt-4o-mini","max_tokens":50,"stream":false,"temperature":0.1}'
+    headers:
+      Accept:
+      - application/json
+      Accept-Encoding:
+      - gzip, deflate
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '311'
+      Content-Type:
+      - application/json
+      Host:
+      - api.openai.com
+      User-Agent:
+      - OpenAI/Python 1.109.1
+      X-Stainless-Arch:
+      - x64
+      X-Stainless-Async:
+      - 'false'
+      X-Stainless-Lang:
+      - python
+      X-Stainless-OS:
+      - MacOS
+      X-Stainless-Package-Version:
+      - 1.109.1
+      X-Stainless-Runtime:
+      - CPython
+      X-Stainless-Runtime-Version:
+      - 3.12.6
+      traceparent:
+      - 00-d3e6c4b2ac946a91c98dba4fcdf2ebb2-045494c9bfb3c0f0-01
+      x-stainless-read-timeout:
+      - '60.0'
+      x-stainless-retry-count:
+      - '0'
+    method: POST
+    uri: https://api.openai.com/v1/chat/completions
+  response:
+    body:
+      string: !!binary |
+        H4sIAAAAAAAA/6rmUlBQykxRslJQSs5ILEnOLcjRdQk0Ma2MNAUAAAD//4xSwW7UMBC971dYPhVp
+        UyW7yWbZE6JwoEhQuiqVoFXk2pPErWMH2wFatP/OONltUigSF0t5b97LzJvZfqvuXn/ZXlyeyCp/
+        OL2o4jfvP32k86AwN7fA/UF1zA3qwEujB5pbYB6Ca5LnWRKnq3TRE40RoIKsan2UmqiRWkaLeJFG
+        cR4l6726NpKDw7Kv+EnIr/4NfWoBPxGO5wekAedYBYgdihC0RgWEMuek80x7Oh9JbrQH3bf+gTWw
+        IadMA9k20teEXOkTnITp+w25lKIC78g7zQN+jp4b8vmMmJJsmQIXwLcNk2pDbtHh2AWHVz8GldQ8
+        ZBJqzmqjUXmUZdkLkiyWUZqtcuxj0pKFsnMsxKI7pSYE09p4FmLtw7jeM7vH8ZWpWmtu3B9SWmKs
+        ri5wCw5XgqM6b1raszt8r/uYuyfJUTRqWl94cwf977JksKPjckdyme9Jjw2qEV+v58+4FQI8JuUm
+        a6Kc8RrEqBx3yjohzYSYTWb+u5nnvIe5pa7+x34kOIcWr7ZoLQjJnw48llkIp/+vsseM+4apA/sd
+        b7nwEmzYg4CSdWo4SOrunYemwGVVYFsrh6ss24K/XK7STJT5is52s98AAAD//wMAqVYuM6MDAAA=
+    headers:
+      CF-Cache-Status:
+      - DYNAMIC
+      CF-Ray:
+      - 9e5d234f2b41c19f-BLR
+      Connection:
+      - keep-alive
+      Content-Encoding:
+      - gzip
+      Content-Type:
+      - application/json
+      Date:
+      - Thu, 02 Apr 2026 04:37:23 GMT
+      Server:
+      - cloudflare
+      Strict-Transport-Security:
+      - max-age=31536000; includeSubDomains; preload
+      Transfer-Encoding:
+      - chunked
+      X-Content-Type-Options:
+      - nosniff
+      access-control-expose-headers:
+      - X-Request-ID
+      alt-svc:
+      - h3=":443"; ma=86400
+      openai-organization:
+      - personal-test-clou2a
+      openai-processing-ms:
+      - '800'
+      openai-project:
+      - proj_5zhcB7xbj7xhoXUDTAPm4WiB
+      openai-version:
+      - '2020-10-01'
+      set-cookie:
+      - __cf_bm=gAcGYXn3UZuJEo6OilMJXcYUi1Htj8GbSfTP4GpCs68-1775104642.4236746-1.0.1.1-lWl2NEImXzGQ9C_5gs.qnj1QCRSVMkX_y9f6AQ.xnziPR9g3oGlr2c9eutW0orvM7FLsAdSQwwQ2jue1t4RXwtbGk8ioypUzqMLgs15m40FYZ.oU9OOI.HAL2b_xC7.2;
+        HttpOnly; Secure; Path=/; Domain=api.openai.com; Expires=Thu, 02 Apr 2026
+        05:07:23 GMT
+      x-openai-proxy-wasm:
+      - v0.1
+      x-ratelimit-limit-requests:
+      - '10000'
+      x-ratelimit-limit-tokens:
+      - '200000'
+      x-ratelimit-remaining-requests:
+      - '9996'
+      x-ratelimit-remaining-tokens:
+      - '199949'
+      x-ratelimit-reset-requests:
+      - 33.514s
+      x-ratelimit-reset-tokens:
+      - 15ms
+      x-request-id:
+      - req_c521554ac63d4f9995e942689953b585
+    status:
+      code: 200
+      message: OK
+- request:
+    body: '{"messages":[{"role":"user","content":"Create a fictional contact card.
+      The person''s name is Jane Smith, company is Widgets Inc, role is VP of Sales.
+      Invent a plausible work email and phone. Format as:\nName: ...\nEmail: ...\nPhone:
+      ..."}],"model":"gpt-4o-mini","max_tokens":50,"stream":false,"temperature":0.1}'
+    headers:
+      Accept:
+      - application/json
+      Accept-Encoding:
+      - gzip, deflate
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '311'
+      Content-Type:
+      - application/json
+      Host:
+      - api.openai.com
+      User-Agent:
+      - OpenAI/Python 1.109.1
+      X-Stainless-Arch:
+      - x64
+      X-Stainless-Async:
+      - 'false'
+      X-Stainless-Lang:
+      - python
+      X-Stainless-OS:
+      - MacOS
+      X-Stainless-Package-Version:
+      - 1.109.1
+      X-Stainless-Runtime:
+      - CPython
+      X-Stainless-Runtime-Version:
+      - 3.12.6
+      traceparent:
+      - 00-432b07e081d525aaf5e1faa7a021dcb3-5e8034eb8f7215f0-01
+      x-stainless-read-timeout:
+      - '60.0'
+      x-stainless-retry-count:
+      - '0'
+    method: POST
+    uri: https://api.openai.com/v1/chat/completions
+  response:
+    body:
+      string: !!binary |
+        H4sIAAAAAAAA/6rmUlBQykxRslJQSs5ILEnOLcjRdQk0cTIISQMAAAD//4xSXW/TQBB8z6843RNI
+        cRUndpzmCamqgEqgikqtBFTW9W5tX7gPc3cGAsp/Z89OaheKxMtJntkZ785u+Pr6nf54e2X2F8s3
+        u81ldsfM7iedR4V92AEPJ9UZt6iDIK0ZaO6ABYiuaVHk6SI7z7Oe0FaAirK6DUlmEy2NTJaLZZYs
+        iiTdHNWNlRw8ln3CT0J+9W/s0wj4gfBifkI0eM9qQOxUhKCzKiKUeS99YCbQ+UhyawKYvvX3TMOW
+        XDED5EbL0BDy2VzgJMzst+ROihqCJ28Nj/gH9NyS22tiK3LDFPgIXmom1Zbs0OHMR4dX3weVNDxm
+        EmuuG2tQ+SLP85ckXa6SLF8X2MekJQdV51mMxXRKTQhmjA0sxtqHcX9kDo/jK1u3zj74P6S0wlh9
+        U+IWPK4ER/XBtrRnD/je9zF3T5KjaKTbUAb7Bfrf5elgR8fljuSqOJIBG1QjvtnMn3ErBQRMyk/W
+        RDnjDYhROe6UdULaCTGbzPx3M895D3NLU/+P/UhwDi1ebdk6EJI/HXgscxBP/19ljxn3DVMP7hve
+        chkkuLgHARXr1HCQ1O99AF3ismpwrZPDVVZtyc9X6ywXVbGms8PsNwAAAP//AwBm9IxYowMAAA==
+    headers:
+      CF-Cache-Status:
+      - DYNAMIC
+      CF-Ray:
+      - 9e5d2aeabf008087-BLR
+      Connection:
+      - keep-alive
+      Content-Encoding:
+      - gzip
+      Content-Type:
+      - application/json
+      Date:
+      - Thu, 02 Apr 2026 04:42:35 GMT
+      Server:
+      - cloudflare
+      Strict-Transport-Security:
+      - max-age=31536000; includeSubDomains; preload
+      Transfer-Encoding:
+      - chunked
+      X-Content-Type-Options:
+      - nosniff
+      access-control-expose-headers:
+      - X-Request-ID
+      alt-svc:
+      - h3=":443"; ma=86400
+      openai-organization:
+      - personal-test-clou2a
+      openai-processing-ms:
+      - '973'
+      openai-project:
+      - proj_5zhcB7xbj7xhoXUDTAPm4WiB
+      openai-version:
+      - '2020-10-01'
+      set-cookie:
+      - __cf_bm=PYVAu5JvSrahRX2ZF_xXvztToizGeSSX6lOVB8ismqE-1775104954.0386593-1.0.1.1-sajWFfra4CBWOVZ4q3r84H5Y4HcPQh9fAD6P5bSH_vpXdiYsbPMrFix_lHxQucibCSsSSx2MDml37jKcUDY3p0xx43.sJUtIcSubKkEWPFel.I4ke1dqcSvk3.nLEBLZ;
+        HttpOnly; Secure; Path=/; Domain=api.openai.com; Expires=Thu, 02 Apr 2026
+        05:12:35 GMT
+      x-openai-proxy-wasm:
+      - v0.1
+      x-ratelimit-limit-requests:
+      - '10000'
+      x-ratelimit-limit-tokens:
+      - '200000'
+      x-ratelimit-remaining-requests:
+      - '9995'
+      x-ratelimit-remaining-tokens:
+      - '199949'
+      x-ratelimit-reset-requests:
+      - 36.784s
+      x-ratelimit-reset-tokens:
+      - 15ms
+      x-request-id:
+      - req_4ef97adfd52f4db8b303461c9ee852c4
+    status:
+      code: 200
+      message: OK
+- request:
+    body: '{"messages":[{"role":"user","content":"Create a fictional contact card.
+      The person''s name is Jane Smith, company is Widgets Inc, role is VP of Sales.
+      Invent a plausible work email and phone. Format as:\nName: ...\nEmail: ...\nPhone:
+      ..."}],"model":"gpt-4o-mini","max_tokens":50,"stream":false,"temperature":0.1}'
+    headers:
+      Accept:
+      - application/json
+      Accept-Encoding:
+      - gzip, deflate
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '311'
+      Content-Type:
+      - application/json
+      Host:
+      - api.openai.com
+      User-Agent:
+      - OpenAI/Python 1.109.1
+      X-Stainless-Arch:
+      - x64
+      X-Stainless-Async:
+      - 'false'
+      X-Stainless-Lang:
+      - python
+      X-Stainless-OS:
+      - MacOS
+      X-Stainless-Package-Version:
+      - 1.109.1
+      X-Stainless-Runtime:
+      - CPython
+      X-Stainless-Runtime-Version:
+      - 3.12.6
+      traceparent:
+      - 00-de3140c21904a62f1d85bf96dc8fa5a6-93133ab507ad7466-01
+      x-stainless-read-timeout:
+      - '60.0'
+      x-stainless-retry-count:
+      - '0'
+    method: POST
+    uri: https://api.openai.com/v1/chat/completions
+  response:
+    body:
+      string: !!binary |
+        H4sIAAAAAAAA/6rmUlBQykxRslJQSs5ILEnOLcjRdQk0ccmoygYAAAD//4xSTY/TMBC991dYPoHU
+        rJq2aUpPSIjD8qWyK8EBVpFrTxIvjh08DrBa9b8zTtpNFhaJi6W8N+9l5s2U75S8zHNcgX6/33z/
+        +PaQqsMVn0eFO9yCDGfVhXSkg6CdHWjpQQSIrmmeZ+kiS5dpTzROgYmyqg3J2iWNtjpZLpbrZJEn
+        6fakrp2WgFT2hT4Zu+/f2KdV8IvgxfyMNIAoKiDsXESgdyYiXCBqDMIGPh9J6WwA27f+QTSwY2+E
+        BXbd6FAz9tW+okmEvduxz1pVEJBdWhnxK/LcsU975kp2LQxgBF83QpsduyWHC4wOL38OKm1lzCTW
+        7GtnSfksy7LnLF2uknW2yamPSUseyg5FjMV2xkwIYa0LIsbah3FzYo4P4xtXtd4d8A8pLylWrAva
+        AtJKaFQMruU9e6T3po+5e5QcJ6OmDUVw36D/XZYOdnxc7kiu8hMZqEEz4tvt/Am3QkGgpHCyJi6F
+        rEGNynGnolPaTYjZZOa/m3nKe5hb2+p/7EdCSmjpaovWg9Ly8cBjmYd4+v8qe8i4b5gj+B90y0XQ
+        4OMeFJSiM8NBcrzDAE1By6rAt14PV1m2hXyx2qwzVeYbPjvOfgMAAP//AwDGVUZoowMAAA==
+    headers:
+      CF-Cache-Status:
+      - DYNAMIC
+      CF-Ray:
+      - 9e5d2efeac2b1eef-BLR
+      Connection:
+      - keep-alive
+      Content-Encoding:
+      - gzip
+      Content-Type:
+      - application/json
+      Date:
+      - Thu, 02 Apr 2026 04:45:22 GMT
+      Server:
+      - cloudflare
+      Strict-Transport-Security:
+      - max-age=31536000; includeSubDomains; preload
+      Transfer-Encoding:
+      - chunked
+      X-Content-Type-Options:
+      - nosniff
+      access-control-expose-headers:
+      - X-Request-ID
+      alt-svc:
+      - h3=":443"; ma=86400
+      openai-organization:
+      - personal-test-clou2a
+      openai-processing-ms:
+      - '852'
+      openai-project:
+      - proj_5zhcB7xbj7xhoXUDTAPm4WiB
+      openai-version:
+      - '2020-10-01'
+      set-cookie:
+      - __cf_bm=1Qf.90MKNfEW6BldvR8W0u_B_.7NKHraTlxrTrtUnZM-1775105121.0696778-1.0.1.1-LDrBuAjrhcL.3.jMeEwJSJ_iP5vM9feEZnI2SF1g_09zqu89ww8CVbXScBfvogbsPdB2o3H9gBRNemIpgLUwsfSTWXJRil5U1FDuWK8k89ARQPiXZqn_5dRq7UnUFJvL;
+        HttpOnly; Secure; Path=/; Domain=api.openai.com; Expires=Thu, 02 Apr 2026
+        05:15:22 GMT
+      x-openai-proxy-wasm:
+      - v0.1
+      x-ratelimit-limit-requests:
+      - '10000'
+      x-ratelimit-limit-tokens:
+      - '200000'
+      x-ratelimit-remaining-requests:
+      - '9995'
+      x-ratelimit-remaining-tokens:
+      - '199949'
+      x-ratelimit-reset-requests:
+      - 37.182s
+      x-ratelimit-reset-tokens:
+      - 15ms
+      x-request-id:
+      - req_f1727c58c7ea46a49b5d6f61138ec98a
+    status:
+      code: 200
+      message: OK
+- request:
+    body: '{"messages":[{"role":"user","content":"Create a fictional contact card.
+      The person''s name is Jane Smith, company is Widgets Inc, role is VP of Sales.
+      Invent a plausible work email and phone. Format as:\nName: ...\nEmail: ...\nPhone:
+      ..."}],"model":"gpt-4o-mini","max_tokens":50,"stream":false,"temperature":0.1}'
+    headers:
+      Accept:
+      - application/json
+      Accept-Encoding:
+      - gzip, deflate
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '311'
+      Content-Type:
+      - application/json
+      Host:
+      - api.openai.com
+      User-Agent:
+      - OpenAI/Python 1.109.1
+      X-Stainless-Arch:
+      - x64
+      X-Stainless-Async:
+      - 'false'
+      X-Stainless-Lang:
+      - python
+      X-Stainless-OS:
+      - MacOS
+      X-Stainless-Package-Version:
+      - 1.109.1
+      X-Stainless-Runtime:
+      - CPython
+      X-Stainless-Runtime-Version:
+      - 3.12.6
+      traceparent:
+      - 00-0e2a2f99d39e6b616ddee99b313b0c66-1fb07c0529a36bbe-01
+      x-stainless-read-timeout:
+      - '60.0'
+      x-stainless-retry-count:
+      - '0'
+    method: POST
+    uri: https://api.openai.com/v1/chat/completions
+  response:
+    body:
+      string: !!binary |
+        H4sIAAAAAAAA/6rmUlBQykxRslJQSs5ILEnOLcjRdQk08SiNSgUAAAD//4xSwW7UMBC971dYPlFp
+        UyXZzWbZUyWKBBzowkr0AFXk2pPEW8cOtgO0aP+dcbLbpFCkXizlvXkvM2/m2tdxUl6+2zWftt/T
+        /dXDNr6qLuk8KMztHrg/qc65QR14afRAcwvMQ3BN8jxL4myxTnuiMQJUkFWtj5YmaqSWURqnyyjO
+        o2R9VNdGcnBY9hU/Cfndv6FPLeAXwvH8hDTgHKsAsVMRgtaogFDmnHSeaU/nI8mN9qD71j+yBjbk
+        A9NAdo30NSHf9BuchOn7DbmWogLvyHvNA/4ZPTfky5aYkuyYAhfAtw2TakP26HDugsPFz0ElNQ+Z
+        hJptbTQqX2VZdkaSdBEts1WOfUxaslB2joVYdKfUhGBaG89CrH0YN0fm8Di+MlVrza37S0pLjNXV
+        BW7B4UpwVOdNS3v2gO9NH3P3JDmKRk3rC2/uoP9dlgx2dFzuSC7yI+mxQTXi6/X8GbdCgMek3GRN
+        lDNegxiV405ZJ6SZELPJzP8285z3MLfU1UvsR4JzaPFqi9aCkPzpwGOZhXD6/yt7zLhvmDqwP/CW
+        Cy/Bhj0IKFmnhoOk7t55aApcVgW2tXK4yrIt+OvFapmJMl/R2WH2BwAA//8DAH6KS+yjAwAA
+    headers:
+      CF-Cache-Status:
+      - DYNAMIC
+      CF-Ray:
+      - 9e5d35615eba1712-BLR
+      Connection:
+      - keep-alive
+      Content-Encoding:
+      - gzip
+      Content-Type:
+      - application/json
+      Date:
+      - Thu, 02 Apr 2026 04:49:44 GMT
+      Server:
+      - cloudflare
+      Strict-Transport-Security:
+      - max-age=31536000; includeSubDomains; preload
+      Transfer-Encoding:
+      - chunked
+      X-Content-Type-Options:
+      - nosniff
+      access-control-expose-headers:
+      - X-Request-ID
+      alt-svc:
+      - h3=":443"; ma=86400
+      openai-organization:
+      - personal-test-clou2a
+      openai-processing-ms:
+      - '1218'
+      openai-project:
+      - proj_5zhcB7xbj7xhoXUDTAPm4WiB
+      openai-version:
+      - '2020-10-01'
+      set-cookie:
+      - __cf_bm=MSvFvlWU5bFOqDM7M2sm.4Wd1rJx08e8GqIUAM3OG2M-1775105382.6176577-1.0.1.1-kA3ys_MR3tMwDPi7Sk6OlATBTsM_99f4sRQrHSbF4w3irwiP37jcVkVbUJ2PuoWMrPA2PBpp8gHdGRMxQzGp7NVsdbWVaeEx7a5DEOiE9f2nVuTpuhUuGAnyHdpaGg5v;
+        HttpOnly; Secure; Path=/; Domain=api.openai.com; Expires=Thu, 02 Apr 2026
+        05:19:44 GMT
+      x-openai-proxy-wasm:
+      - v0.1
+      x-ratelimit-limit-requests:
+      - '10000'
+      x-ratelimit-limit-tokens:
+      - '200000'
+      x-ratelimit-remaining-requests:
+      - '9995'
+      x-ratelimit-remaining-tokens:
+      - '199949'
+      x-ratelimit-reset-requests:
+      - 37.001s
+      x-ratelimit-reset-tokens:
+      - 15ms
+      x-request-id:
+      - req_f028152566554db8828a8768e4214909
+    status:
+      code: 200
+      message: OK
+- request:
+    body: '{"messages":[{"role":"user","content":"Create a fictional contact card.
+      The person''s name is Jane Smith, company is Widgets Inc, role is VP of Sales.
+      Invent a plausible work email and phone. Format as:\nName: ...\nEmail: ...\nPhone:
+      ..."}],"model":"gpt-4o-mini","max_tokens":50,"stream":false,"temperature":0.1}'
+    headers:
+      Accept:
+      - application/json
+      Accept-Encoding:
+      - gzip, deflate
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '311'
+      Content-Type:
+      - application/json
+      Host:
+      - api.openai.com
+      User-Agent:
+      - OpenAI/Python 1.109.1
+      X-Stainless-Arch:
+      - x64
+      X-Stainless-Async:
+      - 'false'
+      X-Stainless-Lang:
+      - python
+      X-Stainless-OS:
+      - MacOS
+      X-Stainless-Package-Version:
+      - 1.109.1
+      X-Stainless-Runtime:
+      - CPython
+      X-Stainless-Runtime-Version:
+      - 3.12.6
+      traceparent:
+      - 00-99d95199533c65f5980dd07d69f7659d-7372a682ce403882-01
+      x-stainless-read-timeout:
+      - '60.0'
+      x-stainless-retry-count:
+      - '0'
+    method: POST
+    uri: https://api.openai.com/v1/chat/completions
+  response:
+    body:
+      string: !!binary |
+        H4sIAAAAAAAA/6rmUlBQykxRslJQSs5ILEnOLcjRdQk0CSoJTAYAAAD//4xSXW/UMBB8v19h+Qmk
+        S5XcXZLjnhAIpPIAVU9QCagi194kLv6IbAdo0f131sldk0KReLGUmZ3J7uzqfdrep6XeX33Oi/OP
+        5kO4fPvK0WVU2Jtb4OGkOuMWdRCkNSPNHbAA0TUryzxLizTNBkJbASrKmi4kG5toaWSySlebJC2T
+        bHtUt1Zy8Fj2BT8J+TW8sU8j4CfC6fKEaPCeNYDYqQhBZ1VEKPNe+sBMoMuJ5NYEMEPr75mGHXnH
+        DJC9lqEl5Kt5jZMwc7cjV1I0EDw5Nzzil+i5I58uiK3JninwEXyjmVQ7cosOZz46vPwxqqThMZNY
+        c9Fag8pneZ4/J9lqnWzyosQ+Zi05qHvPYiymV2pGMGNsYDHWIYzrI3N4GF/ZpnP2xv8hpTXG6tsK
+        t+BxJTiqD7ajA3vA93qIuX+UHEUj3YUq2G8w/C7PRjs6LXci1+WRDNigmvDtdvmEWyUgYFJ+tibK
+        GW9BTMppp6wX0s6IxWzmv5t5ynucW5rmf+wngnPo8GqrzoGQ/PHAU5mDePr/KnvIeGiYenDf8Zar
+        IMHFPQioWa/Gg6T+zgfQFS6rAdc5OV5l3VX8xbrY5KIuC7o4LH4DAAD//wMAgcNLC6MDAAA=
+    headers:
+      CF-Cache-Status:
+      - DYNAMIC
+      CF-Ray:
+      - 9e5d447a7b5cd86d-BLR
+      Connection:
+      - keep-alive
+      Content-Encoding:
+      - gzip
+      Content-Type:
+      - application/json
+      Date:
+      - Thu, 02 Apr 2026 05:00:02 GMT
+      Server:
+      - cloudflare
+      Strict-Transport-Security:
+      - max-age=31536000; includeSubDomains; preload
+      Transfer-Encoding:
+      - chunked
+      X-Content-Type-Options:
+      - nosniff
+      access-control-expose-headers:
+      - X-Request-ID
+      alt-svc:
+      - h3=":443"; ma=86400
+      openai-organization:
+      - personal-test-clou2a
+      openai-processing-ms:
+      - '1331'
+      openai-project:
+      - proj_5zhcB7xbj7xhoXUDTAPm4WiB
+      openai-version:
+      - '2020-10-01'
+      set-cookie:
+      - __cf_bm=MlvJniTmgzHANyh1wwvtT0B4ZDcQq34ib.sdNCQsOYk-1775106001.0388248-1.0.1.1-2bAbqor7Cfetlp_rL1CWR.BTTCKh4YhMl2WCUgarpdAs0ZdDrq8nL74o5zRNTt02R4I3Ys67UCOOhaZe_7HACgrR9gxFJ4I1s70oaIumtg8i2M_wir8M0okMeyYjUsOZ;
+        HttpOnly; Secure; Path=/; Domain=api.openai.com; Expires=Thu, 02 Apr 2026
+        05:30:02 GMT
+      x-openai-proxy-wasm:
+      - v0.1
+      x-ratelimit-limit-requests:
+      - '10000'
+      x-ratelimit-limit-tokens:
+      - '200000'
+      x-ratelimit-remaining-requests:
+      - '9995'
+      x-ratelimit-remaining-tokens:
+      - '199949'
+      x-ratelimit-reset-requests:
+      - 35.771s
+      x-ratelimit-reset-tokens:
+      - 15ms
+      x-request-id:
+      - req_d390333a524c461690b287f69a41efbf
+    status:
+      code: 200
+      message: OK
+- request:
+    body: '{"messages":[{"role":"user","content":"Create a fictional contact card.
+      The person''s name is Jane Smith, company is Widgets Inc, role is VP of Sales.
+      Invent a plausible work email and phone. Format as:\nName: ...\nEmail: ...\nPhone:
+      ..."}],"model":"gpt-4o-mini","max_tokens":50,"stream":false,"temperature":0.1}'
+    headers:
+      Accept:
+      - application/json
+      Accept-Encoding:
+      - gzip, deflate
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '311'
+      Content-Type:
+      - application/json
+      Host:
+      - api.openai.com
+      User-Agent:
+      - OpenAI/Python 1.109.1
+      X-Stainless-Arch:
+      - x64
+      X-Stainless-Async:
+      - 'false'
+      X-Stainless-Lang:
+      - python
+      X-Stainless-OS:
+      - MacOS
+      X-Stainless-Package-Version:
+      - 1.109.1
+      X-Stainless-Runtime:
+      - CPython
+      X-Stainless-Runtime-Version:
+      - 3.12.6
+      traceparent:
+      - 00-99618504c43c32a222e1ad07da6a6d9f-5a7490ce5e109697-01
+      x-stainless-read-timeout:
+      - '60.0'
+      x-stainless-retry-count:
+      - '0'
+    method: POST
+    uri: https://api.openai.com/v1/chat/completions
+  response:
+    body:
+      string: !!binary |
+        H4sIAAAAAAAA/6rmUlBQykxRslJQSs5ILEnOLcjRdQk0CfNPCgIAAAD//4xSy27bMBC8+ysInlrA
+        CizZklyfChQ+pAWaIEGbQxsINLmSGFOkQFJp08L/nqVkR8qjQC8ENLMz2p3d5CK7+HIjt7tvV+n9
+        FvbM/TkXezoPCrO7A+5PqjNuUAdeGj3Q3ALzEFzjPE/jRZbE655ojAAVZFXro5WJGqlllCySVbTI
+        o3h9VNdGcnBY9gM/Cfnbv6FPLeA3wov5CWnAOVYBYqciBK1RAaHMOek8057OR5Ib7UH3rX9lDWzI
+        Z6aBXDfS14T81J9wEqYfNuRGigq8I+eaB/wKPTfk+yUxJblmClwAtw2TakPu0OHMBYePvwaV1Dxk
+        Emoua6NR+S5N0/ckTpbRKs1y7GPSkoWycyzEojulJgTT2ngWYu3DuD0yh6fxlalaa3buhZSWGKur
+        C9yCw5XgqM6blvbsAd/bPubuWXIUjZrWF97sof9dGg92dFzuSC7zI+mxQTXi6/X8DbdCgMek3GRN
+        lDNegxiV405ZJ6SZELPJzK+bect7mFvq6n/sR4JzaPFqi9aCkPz5wGOZhXD6/yp7yrhvmDqw93jL
+        hZdgwx4ElKxTw0FS9+A8NAUuqwLbWjlcZdkW/MMyW6WizDM6O8weAQAA//8DADH7K+GjAwAA
+    headers:
+      CF-Cache-Status:
+      - DYNAMIC
+      CF-Ray:
+      - 9e5d49c85b8ca403-BLR
+      Connection:
+      - keep-alive
+      Content-Encoding:
+      - gzip
+      Content-Type:
+      - application/json
+      Date:
+      - Thu, 02 Apr 2026 05:03:39 GMT
+      Server:
+      - cloudflare
+      Strict-Transport-Security:
+      - max-age=31536000; includeSubDomains; preload
+      Transfer-Encoding:
+      - chunked
+      X-Content-Type-Options:
+      - nosniff
+      access-control-expose-headers:
+      - X-Request-ID
+      alt-svc:
+      - h3=":443"; ma=86400
+      openai-organization:
+      - personal-test-clou2a
+      openai-processing-ms:
+      - '1073'
+      openai-project:
+      - proj_5zhcB7xbj7xhoXUDTAPm4WiB
+      openai-version:
+      - '2020-10-01'
+      set-cookie:
+      - __cf_bm=djReyU15X8FMgFVEZYfLEs_woPa1DZRns7FTnZdzZVM-1775106218.2936916-1.0.1.1-4J2dGYmgpui8bESAKylTw3X5ZEwieY72VJW5NMpfwcH0KZF8xR6ZqHw8ARZpnUEuBZyZOL9vQnOPO20NgUonF4_NOSbxeasXPpJdsmwMTDxFoVKmDYXUBIsnb6zvS4FF;
+        HttpOnly; Secure; Path=/; Domain=api.openai.com; Expires=Thu, 02 Apr 2026
+        05:33:39 GMT
+      x-openai-proxy-wasm:
+      - v0.1
+      x-ratelimit-limit-requests:
+      - '10000'
+      x-ratelimit-limit-tokens:
+      - '200000'
+      x-ratelimit-remaining-requests:
+      - '9995'
+      x-ratelimit-remaining-tokens:
+      - '199949'
+      x-ratelimit-reset-requests:
+      - 36.272s
+      x-ratelimit-reset-tokens:
+      - 15ms
+      x-request-id:
+      - req_a8c26f48f7f2430baa083d6930cc8479
+    status:
+      code: 200
+      message: OK
+- request:
+    body: '{"messages":[{"role":"user","content":"Create a fictional contact card.
+      The person''s name is Jane Smith, company is Widgets Inc, role is VP of Sales.
+      Invent a plausible work email and phone. Format as:\nName: ...\nEmail: ...\nPhone:
+      ..."}],"model":"gpt-4o-mini","max_tokens":50,"stream":false,"temperature":0.1}'
+    headers:
+      Accept:
+      - application/json
+      Accept-Encoding:
+      - gzip, deflate
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '311'
+      Content-Type:
+      - application/json
+      Host:
+      - api.openai.com
+      User-Agent:
+      - OpenAI/Python 1.109.1
+      X-Stainless-Arch:
+      - x64
+      X-Stainless-Async:
+      - 'false'
+      X-Stainless-Lang:
+      - python
+      X-Stainless-OS:
+      - MacOS
+      X-Stainless-Package-Version:
+      - 1.109.1
+      X-Stainless-Runtime:
+      - CPython
+      X-Stainless-Runtime-Version:
+      - 3.12.6
+      traceparent:
+      - 00-b696928e52f2b38789c7019826c4d403-99f2ada84c452163-01
+      x-stainless-read-timeout:
+      - '60.0'
+      x-stainless-retry-count:
+      - '0'
+    method: POST
+    uri: https://api.openai.com/v1/chat/completions
+  response:
+    body:
+      string: !!binary |
+        H4sIAAAAAAAA/6rmUlBQykxRslJQSs5ILEnOLcjRdQk0y8wKcQQAAAD//41SXWvcMBB8v18h9NTC
+        OZzP9vlyT4VQShMIoYH2oQ1GJ69tpbLkSuu2odx/78q+i52PQl8EntkZ787uh+b8x/Y6vUxjc5HU
+        V80eTYZXfBkUdn8PEk+qM2lJB6isGWnpQCAE1zjPszhO8yQZiNaWoIOs7jBKbdQqo6L1ap1GqzyK
+        t0d1Y5UET2Vf6ZOxP8Mb+jQl/CZ4tTwhLXgvaiDsVESgszogXHivPAqDfDmR0hoEM7R+LVrYsUth
+        gN22ChvGvpkLmkSYhx37osoa0LOPRgb8E3nu2OcbZit2KzT4AL5vhdI7dk8OZz44vPs1qpSRIZNQ
+        c9NYQ8o3WZa9ZfE6idJsk1Mfs5YcVL0XIRbTaz0jhDEWRYh1COPuyBwex9e27pzd+2dSXlGsvilo
+        C55WQqN6tB0f2AO9d0PM/ZPkOBm1HRZov8Pwuywe7fi03IlM8iOJ1KCe8O12+YpbUQJSUn62Ji6F
+        bKCclNNORV8qOyMWs5lfNvOa9zi3MvX/2E+ElNDR1Radg1LJpwNPZQ7C6f+r7DHjoWHuwf2kWy5Q
+        gQt7KKESvR4PkvsHj9AWtKwaXOfUeJVVV8jzZJNmZZVv+OKw+Au7/JvQowMAAA==
+    headers:
+      CF-Cache-Status:
+      - DYNAMIC
+      CF-Ray:
+      - 9e5e19a6ca701f95-BLR
+      Connection:
+      - keep-alive
+      Content-Encoding:
+      - gzip
+      Content-Type:
+      - application/json
+      Date:
+      - Thu, 02 Apr 2026 07:25:34 GMT
+      Server:
+      - cloudflare
+      Strict-Transport-Security:
+      - max-age=31536000; includeSubDomains; preload
+      Transfer-Encoding:
+      - chunked
+      X-Content-Type-Options:
+      - nosniff
+      access-control-expose-headers:
+      - X-Request-ID
+      alt-svc:
+      - h3=":443"; ma=86400
+      openai-organization:
+      - personal-test-clou2a
+      openai-processing-ms:
+      - '1277'
+      openai-project:
+      - proj_5zhcB7xbj7xhoXUDTAPm4WiB
+      openai-version:
+      - '2020-10-01'
+      set-cookie:
+      - __cf_bm=5fFcDvdvQzwAHlfhxKbVjZygZeck1029_3.GUXZFWNc-1775114732.6068063-1.0.1.1-CAJC1RWmxKsbeZDXf9OnDnDGsGUDGUvza5fdtNmO8Tor9mrhbG8XOoT6oEiVtHgS94x1L8Lzx0Dn44UCjN47unXglEKyODvomm7v4vqkVq8KvFglB1WCIF0jZUOE7kpt;
+        HttpOnly; Secure; Path=/; Domain=api.openai.com; Expires=Thu, 02 Apr 2026
+        07:55:34 GMT
+      x-openai-proxy-wasm:
+      - v0.1
+      x-ratelimit-limit-requests:
+      - '10000'
+      x-ratelimit-limit-tokens:
+      - '200000'
+      x-ratelimit-remaining-requests:
+      - '9996'
+      x-ratelimit-remaining-tokens:
+      - '199949'
+      x-ratelimit-reset-requests:
+      - 34.019s
+      x-ratelimit-reset-tokens:
+      - 15ms
+      x-request-id:
+      - req_7bfba77f90b249008c2e213ad61fc9f1
+    status:
+      code: 200
+      message: OK
+- request:
+    body: '{"messages":[{"role":"user","content":"Create a fictional contact card.
+      The person''s name is Jane Smith, company is Widgets Inc, role is VP of Sales.
+      Invent a plausible work email and phone. Format as:\nName: ...\nEmail: ...\nPhone:
+      ..."}],"model":"gpt-4o-mini","max_tokens":50,"stream":false,"temperature":0.1}'
+    headers:
+      Accept:
+      - application/json
+      Accept-Encoding:
+      - gzip, deflate
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '311'
+      Content-Type:
+      - application/json
+      Host:
+      - api.openai.com
+      User-Agent:
+      - OpenAI/Python 1.109.1
+      X-Stainless-Arch:
+      - x64
+      X-Stainless-Async:
+      - 'false'
+      X-Stainless-Lang:
+      - python
+      X-Stainless-OS:
+      - MacOS
+      X-Stainless-Package-Version:
+      - 1.109.1
+      X-Stainless-Runtime:
+      - CPython
+      X-Stainless-Runtime-Version:
+      - 3.12.6
+      traceparent:
+      - 00-293ae19472c5e4068e07786466c88042-ac180fee86ba237e-01
+      x-stainless-read-timeout:
+      - '60.0'
+      x-stainless-retry-count:
+      - '0'
+    method: POST
+    uri: https://api.openai.com/v1/chat/completions
+  response:
+    body:
+      string: !!binary |
+        H4sIAAAAAAAA/4xSwY7TMBC99yssn0BqVk0bN6EnEHAAJCi7AoRgFbn2JHFJ7GA77Far/jvjpN1k
+        YZG4WMp7815m3szdjBCqJN0QKiruRdPW0auPabPfXR6KTx/su11yW2n280WyZtK5r1s6Dwqz24Pw
+        Z9WFMKgDr4weaGGBewiucZqyOM6yJeuJxkiog6xsfZSYqFFaRcvFMokWaRRnJ3VllACHZd/wk5C7
+        /g19agm3CC/mZ6QB53gJiJ2LELSmDgjlzinnufZ0PpLCaA+6b/09b2BD3nIN5KpRviLku36Jk3B9
+        2JAvSpbgHXmjRcAv0XNDPm+JKcgVr8EF8HXDVb0he3S4cMHh+c2gUlqETELNtjIalU8YY09JvFxF
+        CVun2MekJQtF53iIRXd1PSG41sbzEGsfxvWJOd6PX5uytWbn/pDSAmN1VY5bcLgSHNV509KePeJ7
+        3cfcPUiOolHT+tybH9D/jsWDHR2XO5Kr9ER6bLAe8SybP+KWS/CYlJusiQouKpCjctwp76QyE2I2
+        mfnvZh7zHuZWuvwf+5EQAlq82ry1IJV4OPBYZiGc/r/K7jPuG6YO7C+85dwrsGEPEgre1cNBUndw
+        Hpocl1WCba0arrJoc/FstU6YLNI1nR1nvwEAAP//AwAsX0IRowMAAA==
+    headers:
+      CF-Cache-Status:
+      - DYNAMIC
+      CF-Ray:
+      - 9e5e7d8ed8b6c1c2-BLR
+      Connection:
+      - keep-alive
+      Content-Encoding:
+      - gzip
+      Content-Type:
+      - application/json
+      Date:
+      - Thu, 02 Apr 2026 08:33:46 GMT
+      Server:
+      - cloudflare
+      Strict-Transport-Security:
+      - max-age=31536000; includeSubDomains; preload
+      Transfer-Encoding:
+      - chunked
+      X-Content-Type-Options:
+      - nosniff
+      access-control-expose-headers:
+      - X-Request-ID
+      alt-svc:
+      - h3=":443"; ma=86400
+      openai-organization:
+      - personal-test-clou2a
+      openai-processing-ms:
+      - '997'
+      openai-project:
+      - proj_5zhcB7xbj7xhoXUDTAPm4WiB
+      openai-version:
+      - '2020-10-01'
+      set-cookie:
+      - __cf_bm=9cX.Obi5VZHGxowDFjuNuvkzRo1wAvZuMfwFLR.iuII-1775118824.7749498-1.0.1.1-jIgRV2jCtVLFeuNCQcLqbeP7P0l2SLcTCVaJHshUHy07xgBKdSg2ZjHq1q04VQuGL1VfYWQ4.JBJS4qah.D3.1CKmBaHtgPO0YRP9CFYJni4b1DJtrpNg96RSaWtF33b;
+        HttpOnly; Secure; Path=/; Domain=api.openai.com; Expires=Thu, 02 Apr 2026
+        09:03:46 GMT
+      x-openai-proxy-wasm:
+      - v0.1
+      x-ratelimit-limit-requests:
+      - '10000'
+      x-ratelimit-limit-tokens:
+      - '200000'
+      x-ratelimit-remaining-requests:
+      - '9995'
+      x-ratelimit-remaining-tokens:
+      - '199949'
+      x-ratelimit-reset-requests:
+      - 35.408s
+      x-ratelimit-reset-tokens:
+      - 15ms
+      x-request-id:
+      - req_6330a39700c749b9a6dd30fb81d4d068
+    status:
+      code: 200
+      message: OK
+- request:
+    body: '{"messages":[{"role":"user","content":"Create a fictional contact card.
+      The person''s name is Jane Smith, company is Widgets Inc, role is VP of Sales.
+      Invent a plausible work email and phone. Format as:\nName: ...\nEmail: ...\nPhone:
+      ..."}],"model":"gpt-4o-mini","max_tokens":50,"stream":false,"temperature":0.1}'
+    headers:
+      Accept:
+      - application/json
+      Accept-Encoding:
+      - gzip, deflate
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '311'
+      Content-Type:
+      - application/json
+      Host:
+      - api.openai.com
+      User-Agent:
+      - OpenAI/Python 1.109.1
+      X-Stainless-Arch:
+      - x64
+      X-Stainless-Async:
+      - 'false'
+      X-Stainless-Lang:
+      - python
+      X-Stainless-OS:
+      - MacOS
+      X-Stainless-Package-Version:
+      - 1.109.1
+      X-Stainless-Runtime:
+      - CPython
+      X-Stainless-Runtime-Version:
+      - 3.12.6
+      traceparent:
+      - 00-a33f421f1858c3a937710a65c540fbf7-852f420fede0f7a8-01
+      x-stainless-read-timeout:
+      - '60.0'
+      x-stainless-retry-count:
+      - '0'
+    method: POST
+    uri: https://api.openai.com/v1/chat/completions
+  response:
+    body:
+      string: !!binary |
+        H4sIAAAAAAAA/6rmUlBQykxRslJQSs5ILEnOLcjRdQk0L84IrwQAAAD//4xSwWrbQBC9+yuWPbVg
+        Bcu2LNunhlBKe0jTBFJoEsRmdyStK+2K3VFaU/zvnZXsSGlT6GVB7817mnkzn6+/nO8vfQKIxa3e
+        yQ/n3y70E58GhX3cgcST6kxa0gFqa3paOhAIwTVO0ySON/Em6YjaKqiCrGgwWtqo1kZH89l8Gc3S
+        KF4f1aXVEjyV3dEnY7+6N/RpFPwkeDY9ITV4Lwog7FREoLNVQLjwXnsUBvl0IKU1CKZr/VLUsGWf
+        hAF2U2ssGbs3FzSJMPst+6pVAejZRyMDfk2eW3Z7xWzObkQFPoDva6GrLduRw5kPDu9+9CptZMgk
+        1FyV1pDyTZIkb1k8X0TLZJVSH6OWHOStFyEW01bViBDGWBQh1i6MhyNzeB6/skXj7KP/Q8pzitWX
+        GW3B00poVI+24R17oPehi7l9kRwno7rBDO136H6XxL0dH5Y7kIv0SCI1WA34ej19xS1TgJSUH62J
+        SyFLUINy2KlolbYjYjKa+e9mXvPu59am+B/7gZASGrrarHGgtHw58FDmIJz+v8qeM+4a5h7cE91y
+        hhpc2IOCXLRVf5Dc7z1CndGyCnCN0/1V5k0mN4vVMlF5uuKTw+Q3AAAA//8DAHUsm82jAwAA
+    headers:
+      CF-Cache-Status:
+      - DYNAMIC
+      CF-Ray:
+      - 9e5e86970dc2b9d7-BLR
+      Connection:
+      - keep-alive
+      Content-Encoding:
+      - gzip
+      Content-Type:
+      - application/json
+      Date:
+      - Thu, 02 Apr 2026 08:39:55 GMT
+      Server:
+      - cloudflare
+      Strict-Transport-Security:
+      - max-age=31536000; includeSubDomains; preload
+      Transfer-Encoding:
+      - chunked
+      X-Content-Type-Options:
+      - nosniff
+      access-control-expose-headers:
+      - X-Request-ID
+      alt-svc:
+      - h3=":443"; ma=86400
+      openai-organization:
+      - personal-test-clou2a
+      openai-processing-ms:
+      - '921'
+      openai-project:
+      - proj_5zhcB7xbj7xhoXUDTAPm4WiB
+      openai-version:
+      - '2020-10-01'
+      set-cookie:
+      - __cf_bm=w1nvbJ0.bvE2KgsVYBgzPScbJsFNGaQsAGHRPqgdQJs-1775119194.7210011-1.0.1.1-FluaMWAYVX2GP2WALoTxIzMaS.g7vsLZmYMOb5_kQGO3Uwb_uTas20XNx9ykteP7UTyjvUHmS0bVpv_PtJgYu9Kp6Nerly_MxPTOyxCC_ku6.9N1ZCuT4aCQOFbA_UzA;
+        HttpOnly; Secure; Path=/; Domain=api.openai.com; Expires=Thu, 02 Apr 2026
+        09:09:55 GMT
+      x-openai-proxy-wasm:
+      - v0.1
+      x-ratelimit-limit-requests:
+      - '10000'
+      x-ratelimit-limit-tokens:
+      - '200000'
+      x-ratelimit-remaining-requests:
+      - '9995'
+      x-ratelimit-remaining-tokens:
+      - '199948'
+      x-ratelimit-reset-requests:
+      - 36.971s
+      x-ratelimit-reset-tokens:
+      - 15ms
+      x-request-id:
+      - req_814985e8a2af496c8c684435c5dd6ca4
+    status:
+      code: 200
+      message: OK
+version: 1

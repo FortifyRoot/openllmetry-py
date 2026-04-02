@@ -496,6 +496,9 @@ class TraceloopCallbackHandler(BaseCallbackHandler):
             serialized=serialized,
         )
         set_request_params(span, kwargs, self.spans[run_id])
+        # FR: emit deferred prompt safety findings now that the span exists
+        from opentelemetry.instrumentation.fortifyroot import emit_deferred_findings
+        emit_deferred_findings(span)
         if should_emit_events():
             self._emit_chat_input_events(messages)
         else:
@@ -526,6 +529,9 @@ class TraceloopCallbackHandler(BaseCallbackHandler):
             serialized=serialized,
         )
         set_request_params(span, kwargs, self.spans[run_id])
+        # FR: emit deferred prompt safety findings now that the span exists
+        from opentelemetry.instrumentation.fortifyroot import emit_deferred_findings
+        emit_deferred_findings(span)
         if should_emit_events():
             for prompt in prompts:
                 emit_event(MessageEvent(content=prompt, role="user"))
@@ -641,6 +647,10 @@ class TraceloopCallbackHandler(BaseCallbackHandler):
                 GenAIAttributes.GEN_AI_RESPONSE_MODEL: model_name or "unknown",
             },
         )
+
+        # FR: emit deferred completion safety findings before span ends
+        from opentelemetry.instrumentation.fortifyroot import emit_deferred_findings
+        emit_deferred_findings(span)
 
         self._end_span(span, run_id)
 

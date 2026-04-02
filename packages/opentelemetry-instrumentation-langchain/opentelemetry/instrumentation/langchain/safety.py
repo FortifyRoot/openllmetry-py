@@ -26,26 +26,46 @@ logger = logging.getLogger(__name__)
 
 
 def base_chat_model_generate_wrapper(wrapped, instance, args, kwargs):
+    from opentelemetry.instrumentation.fortifyroot import discard_deferred_findings
+    discard_deferred_findings()  # FR: prevent stale findings from prior request on same thread
     updated_args, updated_kwargs = _apply_chat_prompt_safety(instance, args, kwargs)
     return wrapped(*updated_args, **updated_kwargs)
 
 
 async def base_chat_model_agenerate_wrapper(wrapped, instance, args, kwargs):
-    updated_args, updated_kwargs = await asyncio.to_thread(  # FR: async safety
-        _apply_chat_prompt_safety, instance, args, kwargs
+    from opentelemetry.instrumentation.fortifyroot import (
+        discard_deferred_findings, drain_deferred_findings, inject_deferred_findings,
     )
+    discard_deferred_findings()
+
+    def _safety_on_worker():
+        result = _apply_chat_prompt_safety(instance, args, kwargs)
+        return result, drain_deferred_findings()
+
+    (updated_args, updated_kwargs), worker_findings = await asyncio.to_thread(_safety_on_worker)
+    inject_deferred_findings(worker_findings)
     return await wrapped(*updated_args, **updated_kwargs)
 
 
 def base_llm_generate_wrapper(wrapped, instance, args, kwargs):
+    from opentelemetry.instrumentation.fortifyroot import discard_deferred_findings
+    discard_deferred_findings()
     updated_args, updated_kwargs = _apply_llm_prompt_safety(instance, args, kwargs)
     return wrapped(*updated_args, **updated_kwargs)
 
 
 async def base_llm_agenerate_wrapper(wrapped, instance, args, kwargs):
-    updated_args, updated_kwargs = await asyncio.to_thread(  # FR: async safety
-        _apply_llm_prompt_safety, instance, args, kwargs
+    from opentelemetry.instrumentation.fortifyroot import (
+        discard_deferred_findings, drain_deferred_findings, inject_deferred_findings,
     )
+    discard_deferred_findings()
+
+    def _safety_on_worker():
+        result = _apply_llm_prompt_safety(instance, args, kwargs)
+        return result, drain_deferred_findings()
+
+    (updated_args, updated_kwargs), worker_findings = await asyncio.to_thread(_safety_on_worker)
+    inject_deferred_findings(worker_findings)
     return await wrapped(*updated_args, **updated_kwargs)
 
 
@@ -58,8 +78,15 @@ def base_chat_model_generate_with_cache_wrapper(wrapped, instance, args, kwargs)
 async def base_chat_model_agenerate_with_cache_wrapper(
     wrapped, instance, args, kwargs
 ):
+    from opentelemetry.instrumentation.fortifyroot import drain_deferred_findings, inject_deferred_findings
     response = await wrapped(*args, **kwargs)
-    await asyncio.to_thread(_apply_chat_result_completion_safety, instance, response)  # FR: async safety
+
+    def _completion_safety_on_worker():
+        _apply_chat_result_completion_safety(instance, response)
+        return drain_deferred_findings()
+
+    worker_findings = await asyncio.to_thread(_completion_safety_on_worker)  # FR: async safety
+    inject_deferred_findings(worker_findings)
     return response
 
 
@@ -70,8 +97,15 @@ def base_llm_generate_helper_wrapper(wrapped, instance, args, kwargs):
 
 
 async def base_llm_agenerate_helper_wrapper(wrapped, instance, args, kwargs):
+    from opentelemetry.instrumentation.fortifyroot import drain_deferred_findings, inject_deferred_findings
     response = await wrapped(*args, **kwargs)
-    await asyncio.to_thread(_apply_llm_result_completion_safety, instance, response)  # FR: async safety
+
+    def _completion_safety_on_worker():
+        _apply_llm_result_completion_safety(instance, response)
+        return drain_deferred_findings()
+
+    worker_findings = await asyncio.to_thread(_completion_safety_on_worker)  # FR: async safety
+    inject_deferred_findings(worker_findings)
     return response
 
 

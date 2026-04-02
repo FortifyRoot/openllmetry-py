@@ -327,14 +327,101 @@ def _normalize_decision(value: str) -> str:
     return SafetyDecision.ALLOW.value
 
 
+# ---------------------------------------------------------------------------
+# FR: Deferred finding buffer — thread-local queue for safety findings that
+# are produced when no valid OTel span is current (e.g. LangChain/LlamaIndex
+# safety pre-wrappers run before the callback handler creates the span).
+#
+# Thread-local so concurrent requests on different threads don't interfere.
+#
+# Four operations on the buffer:
+#
+#   discard   — throw away all findings (data lost). Use at wrapper entry
+#               to prevent stale findings from a prior request leaking.
+#
+#   emit      — write all findings as span events on a given span, then
+#               clear the buffer. Use after the real span is created.
+#
+#   drain     — remove and return all findings from THIS thread's buffer.
+#               Use on a worker thread (asyncio.to_thread) to extract
+#               findings before returning to the calling thread.
+#
+#   inject    — append findings INTO this thread's buffer. Use on the
+#               calling thread to re-insert findings drained from a worker.
+#
+# Async pattern (drain + inject):
+#   Worker threads created by asyncio.to_thread get their own thread-local
+#   buffer. Callers must drain on the worker and inject on the event-loop
+#   thread so that the callback handler's emit() sees the findings.
+# ---------------------------------------------------------------------------
+
+_deferred = threading.local()
+
+
+def discard_deferred_findings() -> None:
+    """Throw away all buffered findings on this thread — data is lost.
+
+    Call at the START of a new safety wrapper invocation to prevent stale
+    findings from a prior request on the same thread from leaking into the
+    current request's span.
+    """
+    _deferred.items = []
+
+
+def emit_deferred_findings(span: Span | None) -> None:
+    """Write all buffered findings as span events on *span*, then clear.
+
+    Each finding becomes a ``fortifyroot.safety.violation`` span event.
+    Safe to call when the buffer is empty or *span* is None/ended (no-op).
+    """
+    items: list[dict[str, Any]] = getattr(_deferred, "items", [])
+    _deferred.items = []
+    if not span or not span.is_recording() or not items:
+        return
+    for attrs in items:
+        span.add_event(SAFETY_EVENT_NAME, attributes=attrs)
+
+
+def drain_deferred_findings() -> list[dict[str, Any]]:
+    """Remove and return all findings from this thread's buffer.
+
+    Use on a worker thread after safety runs, then pass the returned list
+    to ``inject_deferred_findings()`` on the calling thread::
+
+        def _on_worker():
+            apply_safety(...)
+            return drain_deferred_findings()
+
+        findings = await asyncio.to_thread(_on_worker)
+        inject_deferred_findings(findings)
+    """
+    items: list[dict[str, Any]] = getattr(_deferred, "items", [])
+    _deferred.items = []
+    return items
+
+
+def inject_deferred_findings(items: list[dict[str, Any]]) -> None:
+    """Append findings (from another thread) into this thread's buffer.
+
+    Counterpart to ``drain_deferred_findings()``.  No-op if *items* is
+    empty.
+    """
+    if not items:
+        return
+    if not hasattr(_deferred, "items"):
+        _deferred.items = []
+    _deferred.items.extend(items)
+
+
 def _emit_findings(
     span: Span | None,
     context: SafetyContext,
     result: SafetyResult,
 ) -> None:
-    if span is None or not span.is_recording():
+    if not result.findings:
         return
 
+    attrs_list = []
     for finding in result.findings:
         attributes: dict[str, Any] = {
             "fortifyroot.safety.category": finding.category,
@@ -349,4 +436,15 @@ def _emit_findings(
             attributes["fortifyroot.safety.segment_index"] = context.segment_index
         if context.segment_role:
             attributes["fortifyroot.safety.segment_role"] = context.segment_role
-        span.add_event(SAFETY_EVENT_NAME, attributes=attributes)
+        attrs_list.append(attributes)
+
+    # If the span is valid and recording, emit immediately
+    if span is not None and span.is_recording():
+        for attributes in attrs_list:
+            span.add_event(SAFETY_EVENT_NAME, attributes=attributes)
+        return
+
+    # Otherwise buffer for deferred emission
+    if not hasattr(_deferred, "items"):
+        _deferred.items = []
+    _deferred.items.extend(attrs_list)
