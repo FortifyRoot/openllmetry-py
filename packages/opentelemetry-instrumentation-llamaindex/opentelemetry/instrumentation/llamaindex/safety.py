@@ -153,16 +153,12 @@ def llm_stream_chat_wrapper(wrapped, instance, args, kwargs):  # FR: streaming s
     _enter_safety()
     try:
         updated_args, updated_kwargs = _apply_chat_prompt_safety(instance, args, kwargs)
-    except Exception:
+        span = trace.get_current_span()
+        span_name = f"{instance.__class__.__name__}.stream_chat"
+        safety = LlamaIndexStreamingSafety(span, span_name, LLMRequestTypeValues.CHAT.value)
+        return wrap_stream(wrapped(*updated_args, **updated_kwargs), safety)
+    finally:
         _exit_safety()
-        raise
-    # NOTE: _exit_safety NOT called here — the generator from wrap_stream may
-    # outlive this call frame.  The depth counter stays +1 during iteration,
-    # which is harmless (prevents spurious clears during nested calls).
-    span = trace.get_current_span()
-    span_name = f"{instance.__class__.__name__}.stream_chat"
-    safety = LlamaIndexStreamingSafety(span, span_name, LLMRequestTypeValues.CHAT.value)
-    return wrap_stream(wrapped(*updated_args, **updated_kwargs), safety)
 
 
 async def llm_astream_chat_wrapper(wrapped, instance, args, kwargs):  # FR: streaming safety
@@ -183,14 +179,13 @@ async def llm_astream_chat_wrapper(wrapped, instance, args, kwargs):  # FR: stre
 
         (updated_args, updated_kwargs), worker_findings = await asyncio.to_thread(_safety_on_worker)
         inject_deferred_findings(worker_findings)
-    except Exception:
+        result = wrapped(*updated_args, **updated_kwargs)
+        if _inspect.iscoroutine(result):  # coroutine returning async gen (standard LI pattern)
+            result = await result
+        safety = LlamaIndexStreamingSafety(span, span_name, LLMRequestTypeValues.CHAT.value)
+        return make_async_stream(result, safety)
+    finally:
         _exit_safety()
-        raise
-    result = wrapped(*updated_args, **updated_kwargs)
-    if _inspect.iscoroutine(result):  # coroutine returning async gen (standard LI pattern)
-        result = await result
-    safety = LlamaIndexStreamingSafety(span, span_name, LLMRequestTypeValues.CHAT.value)
-    return make_async_stream(result, safety)
 
 
 def llm_stream_complete_wrapper(wrapped, instance, args, kwargs):  # FR: streaming safety
@@ -201,13 +196,12 @@ def llm_stream_complete_wrapper(wrapped, instance, args, kwargs):  # FR: streami
     _enter_safety()
     try:
         updated_args, updated_kwargs = _apply_completion_prompt_safety(instance, args, kwargs)
-    except Exception:
+        span = trace.get_current_span()
+        span_name = f"{instance.__class__.__name__}.stream_complete"
+        safety = LlamaIndexStreamingSafety(span, span_name, LLMRequestTypeValues.COMPLETION.value)
+        return wrap_stream(wrapped(*updated_args, **updated_kwargs), safety)
+    finally:
         _exit_safety()
-        raise
-    span = trace.get_current_span()
-    span_name = f"{instance.__class__.__name__}.stream_complete"
-    safety = LlamaIndexStreamingSafety(span, span_name, LLMRequestTypeValues.COMPLETION.value)
-    return wrap_stream(wrapped(*updated_args, **updated_kwargs), safety)
 
 
 async def llm_astream_complete_wrapper(wrapped, instance, args, kwargs):  # FR: streaming safety
@@ -228,14 +222,13 @@ async def llm_astream_complete_wrapper(wrapped, instance, args, kwargs):  # FR: 
 
         (updated_args, updated_kwargs), worker_findings = await asyncio.to_thread(_safety_on_worker)
         inject_deferred_findings(worker_findings)
-    except Exception:
+        result = wrapped(*updated_args, **updated_kwargs)
+        if _inspect.iscoroutine(result):
+            result = await result
+        safety = LlamaIndexStreamingSafety(span, span_name, LLMRequestTypeValues.COMPLETION.value)
+        return make_async_stream(result, safety)
+    finally:
         _exit_safety()
-        raise
-    result = wrapped(*updated_args, **updated_kwargs)
-    if _inspect.iscoroutine(result):
-        result = await result
-    safety = LlamaIndexStreamingSafety(span, span_name, LLMRequestTypeValues.COMPLETION.value)
-    return make_async_stream(result, safety)
 
 
 _METHOD_WRAPPERS = {
