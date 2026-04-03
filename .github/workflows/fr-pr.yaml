@@ -18,19 +18,28 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v4
 
-      - name: Fail on hardcoded provider API keys
+      - name: Fail on hardcoded secrets or credentials
         shell: bash
         run: |
           set -euo pipefail
 
-          regex='(sk-(proj-)?[A-Za-z0-9_-]{20,}|sk-or-v1-[A-Za-z0-9]{20,}|sk-ant-[A-Za-z0-9_-]{20,}|gsk_[A-Za-z0-9_-]{20,})'
+          # LLM providers: OpenAI, OpenRouter, Anthropic, Groq, Google AI, FortifyRoot
+          # Cloud: AWS access key IDs, GCP service account JSON, GitHub PATs
+          key_patterns='(sk-(proj-)?[A-Za-z0-9_-]{20,}|sk-or-v1-[A-Za-z0-9]{20,}|sk-ant-[A-Za-z0-9_-]{20,}|gsk_[A-Za-z0-9_-]{20,}|AIzaSy[A-Za-z0-9_-]{33}|AKIA[A-Z0-9]{16}|fr_sk_[A-Za-z0-9_-]{30,}|ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,})'
+          json_patterns='("type"[[:space:]]*:[[:space:]]*"service_account")'
+          regex="(${key_patterns}|${json_patterns})"
 
-          if git grep -nI -E "$regex" -- . ':(exclude)*.lock' ':(exclude)*.env.example' ':(exclude)*.env.*.example'; then
-            echo "::error::Potential hardcoded provider key detected. Remove it and use placeholders or GitHub Secrets."
+          if git grep -nI -E "$regex" -- . \
+              ':(exclude)*.lock' \
+              ':(exclude)*.env.example' \
+              ':(exclude)*.env.*.example' \
+              ':(exclude).github/workflows/*' \
+              ':(exclude)packages/opentelemetry-instrumentation-anthropic/tests/cassettes/test_bedrock_with_raw_response/*'; then
+            echo "::error::Potential hardcoded secret or credential detected. Remove it and use placeholders or GitHub Secrets."
             exit 1
           fi
 
-          echo "No hardcoded provider key patterns detected."
+          echo "No hardcoded secrets or credentials detected."
 
   fr-tests:
     needs: secret-scan
