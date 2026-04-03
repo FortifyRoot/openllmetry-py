@@ -70,6 +70,8 @@ async def base_llm_agenerate_wrapper(wrapped, instance, args, kwargs):
 
 
 def base_chat_model_generate_with_cache_wrapper(wrapped, instance, args, kwargs):
+    from opentelemetry.instrumentation.fortifyroot import discard_deferred_findings
+    discard_deferred_findings()  # FR: prevent stale findings from prior request on same thread
     response = wrapped(*args, **kwargs)
     _apply_chat_result_completion_safety(instance, response)
     return response
@@ -91,6 +93,8 @@ async def base_chat_model_agenerate_with_cache_wrapper(
 
 
 def base_llm_generate_helper_wrapper(wrapped, instance, args, kwargs):
+    from opentelemetry.instrumentation.fortifyroot import discard_deferred_findings
+    discard_deferred_findings()  # FR: prevent stale findings from prior request on same thread
     response = wrapped(*args, **kwargs)
     _apply_llm_result_completion_safety(instance, response)
     return response
