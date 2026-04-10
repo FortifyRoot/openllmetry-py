@@ -163,7 +163,7 @@ class TracerWrapper(object):
 
             init_instrumentations(
                 should_enrich_metrics,
-                image_uploader.aupload_base64_image,
+                image_uploader.aupload_base64_image if image_uploader else None,
                 instruments,
                 block_instruments,
             )
