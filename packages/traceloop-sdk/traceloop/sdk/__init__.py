@@ -146,7 +146,9 @@ class Traceloop:
             exporter=exporter,
             sampler=sampler,
             should_enrich_metrics=should_enrich_metrics,
-            image_uploader=image_uploader or ImageUploader(api_endpoint, api_key),
+            image_uploader=image_uploader or (
+                ImageUploader(api_endpoint, api_key) if endpoint_is_traceloop else None
+            ),
             instruments=instruments,
             block_instruments=block_instruments,
             span_postprocess_callback=span_postprocess_callback,
