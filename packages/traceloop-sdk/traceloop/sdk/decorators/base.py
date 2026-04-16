@@ -1,3 +1,7 @@
+# NOTE:
+# This file has been modified by FortifyRoot.
+# Original source: https://github.com/traceloop/openllmetry
+
 import json
 from functools import wraps
 import os
@@ -158,10 +162,10 @@ def _setup_span(entity_name, tlp_span_kind, version):
             entity_path = get_chained_entity_path(entity_name)
             set_entity_path(entity_path)
 
-        span.set_attribute(SpanAttributes.TRACELOOP_SPAN_KIND, tlp_span_kind.value)
-        span.set_attribute(SpanAttributes.TRACELOOP_ENTITY_NAME, entity_name)
+        span.set_attribute(SpanAttributes.FORTIFYROOT_SPAN_KIND, tlp_span_kind.value)
+        span.set_attribute(SpanAttributes.FORTIFYROOT_ENTITY_NAME, entity_name)
         if version:
-            span.set_attribute(SpanAttributes.TRACELOOP_ENTITY_VERSION, version)
+            span.set_attribute(SpanAttributes.FORTIFYROOT_ENTITY_VERSION, version)
 
     return span, ctx, ctx_token
 
@@ -175,7 +179,7 @@ def _handle_span_input(span, args, kwargs, cls=None):
             )
             truncated_json = _truncate_json_if_needed(json_input)
             span.set_attribute(
-                SpanAttributes.TRACELOOP_ENTITY_INPUT,
+                SpanAttributes.FORTIFYROOT_ENTITY_INPUT,
                 truncated_json,
             )
     except TypeError:
@@ -189,7 +193,7 @@ def _handle_span_output(span, res, cls=None):
             json_output = json.dumps(res, **({"cls": cls} if cls else {}))
             truncated_json = _truncate_json_if_needed(json_output)
             span.set_attribute(
-                SpanAttributes.TRACELOOP_ENTITY_OUTPUT,
+                SpanAttributes.FORTIFYROOT_ENTITY_OUTPUT,
                 truncated_json,
             )
     except TypeError:

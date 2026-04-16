@@ -1,3 +1,7 @@
+# NOTE:
+# This file has been modified by FortifyRoot.
+# Original source: https://github.com/traceloop/openllmetry
+
 from enum import Enum
 
 SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY = "suppress_language_model_instrumentation"
@@ -118,27 +122,45 @@ class SpanAttributes:
     PINECONE_QUERY_QUERIES = "pinecone.query.queries"
     PINECONE_QUERY_TOP_K = "pinecone.query.top_k"
 
-    # LLM Workflows
-    TRACELOOP_SPAN_KIND = "traceloop.span.kind"
-    TRACELOOP_WORKFLOW_NAME = "traceloop.workflow.name"
-    TRACELOOP_ENTITY_NAME = "traceloop.entity.name"
-    TRACELOOP_ENTITY_PATH = "traceloop.entity.path"
-    TRACELOOP_ENTITY_VERSION = "traceloop.entity.version"
-    TRACELOOP_ENTITY_INPUT = "traceloop.entity.input"
-    TRACELOOP_ENTITY_OUTPUT = "traceloop.entity.output"
-    TRACELOOP_ASSOCIATION_PROPERTIES = "traceloop.association.properties"
+    # LLM Workflows (FortifyRoot-branded attribute keys)
+    FORTIFYROOT_SPAN_KIND = "fortifyroot.span.kind"
+    FORTIFYROOT_WORKFLOW_NAME = "fortifyroot.workflow.name"
+    FORTIFYROOT_ENTITY_NAME = "fortifyroot.entity.name"
+    FORTIFYROOT_ENTITY_PATH = "fortifyroot.entity.path"
+    FORTIFYROOT_ENTITY_VERSION = "fortifyroot.entity.version"
+    FORTIFYROOT_ENTITY_INPUT = "fortifyroot.entity.input"
+    FORTIFYROOT_ENTITY_OUTPUT = "fortifyroot.entity.output"
+    FORTIFYROOT_ASSOCIATION_PROPERTIES = "fortifyroot.association.properties"
 
-    # Prompts
-    TRACELOOP_PROMPT_MANAGED = "traceloop.prompt.managed"
-    TRACELOOP_PROMPT_KEY = "traceloop.prompt.key"
-    TRACELOOP_PROMPT_VERSION = "traceloop.prompt.version"
-    TRACELOOP_PROMPT_VERSION_NAME = "traceloop.prompt.version_name"
-    TRACELOOP_PROMPT_VERSION_HASH = "traceloop.prompt.version_hash"
-    TRACELOOP_PROMPT_TEMPLATE = "traceloop.prompt.template"
-    TRACELOOP_PROMPT_TEMPLATE_VARIABLES = "traceloop.prompt.template_variables"
+    # Prompts (FortifyRoot-branded attribute keys)
+    FORTIFYROOT_PROMPT_MANAGED = "fortifyroot.prompt.managed"
+    FORTIFYROOT_PROMPT_KEY = "fortifyroot.prompt.key"
+    FORTIFYROOT_PROMPT_VERSION = "fortifyroot.prompt.version"
+    FORTIFYROOT_PROMPT_VERSION_NAME = "fortifyroot.prompt.version_name"
+    FORTIFYROOT_PROMPT_VERSION_HASH = "fortifyroot.prompt.version_hash"
+    FORTIFYROOT_PROMPT_TEMPLATE = "fortifyroot.prompt.template"
+    FORTIFYROOT_PROMPT_TEMPLATE_VARIABLES = "fortifyroot.prompt.template_variables"
 
     # Deprecated
-    TRACELOOP_CORRELATION_ID = "traceloop.correlation.id"
+    FORTIFYROOT_CORRELATION_ID = "fortifyroot.correlation.id"
+
+    # Backward-compatible aliases (all resolve to fortifyroot.* values above)
+    TRACELOOP_SPAN_KIND = FORTIFYROOT_SPAN_KIND
+    TRACELOOP_WORKFLOW_NAME = FORTIFYROOT_WORKFLOW_NAME
+    TRACELOOP_ENTITY_NAME = FORTIFYROOT_ENTITY_NAME
+    TRACELOOP_ENTITY_PATH = FORTIFYROOT_ENTITY_PATH
+    TRACELOOP_ENTITY_VERSION = FORTIFYROOT_ENTITY_VERSION
+    TRACELOOP_ENTITY_INPUT = FORTIFYROOT_ENTITY_INPUT
+    TRACELOOP_ENTITY_OUTPUT = FORTIFYROOT_ENTITY_OUTPUT
+    TRACELOOP_ASSOCIATION_PROPERTIES = FORTIFYROOT_ASSOCIATION_PROPERTIES
+    TRACELOOP_PROMPT_MANAGED = FORTIFYROOT_PROMPT_MANAGED
+    TRACELOOP_PROMPT_KEY = FORTIFYROOT_PROMPT_KEY
+    TRACELOOP_PROMPT_VERSION = FORTIFYROOT_PROMPT_VERSION
+    TRACELOOP_PROMPT_VERSION_NAME = FORTIFYROOT_PROMPT_VERSION_NAME
+    TRACELOOP_PROMPT_VERSION_HASH = FORTIFYROOT_PROMPT_VERSION_HASH
+    TRACELOOP_PROMPT_TEMPLATE = FORTIFYROOT_PROMPT_TEMPLATE
+    TRACELOOP_PROMPT_TEMPLATE_VARIABLES = FORTIFYROOT_PROMPT_TEMPLATE_VARIABLES
+    TRACELOOP_CORRELATION_ID = FORTIFYROOT_CORRELATION_ID
 
     # Watson/genai LLM
     LLM_DECODING_METHOD = "llm.watsonx.decoding_method"
@@ -287,9 +309,13 @@ class LLMRequestTypeValues(Enum):
     UNKNOWN = "unknown"
 
 
-class TraceloopSpanKindValues(Enum):
+class FortifyrootSpanKindValues(Enum):
     WORKFLOW = "workflow"
     TASK = "task"
     AGENT = "agent"
     TOOL = "tool"
     UNKNOWN = "unknown"
+
+
+# Backward-compatible alias
+TraceloopSpanKindValues = FortifyrootSpanKindValues

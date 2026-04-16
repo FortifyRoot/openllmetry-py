@@ -265,7 +265,7 @@ def set_association_properties(properties: dict) -> None:
 def _set_association_properties_attributes(span, properties: dict) -> None:
     for key, value in properties.items():
         span.set_attribute(
-            f"{SpanAttributes.TRACELOOP_ASSOCIATION_PROPERTIES}.{key}", value
+            f"{SpanAttributes.FORTIFYROOT_ASSOCIATION_PROPERTIES}.{key}", value
         )
 
 
@@ -378,7 +378,7 @@ def default_span_processor_on_start(span: Span, parent_context: Context | None =
     """
     workflow_name = get_value("workflow_name")
     if workflow_name is not None:
-        span.set_attribute(SpanAttributes.TRACELOOP_WORKFLOW_NAME, str(workflow_name))
+        span.set_attribute(SpanAttributes.FORTIFYROOT_WORKFLOW_NAME, str(workflow_name))
 
     agent_name = get_value("agent_name")
     if agent_name is not None:
@@ -390,7 +390,7 @@ def default_span_processor_on_start(span: Span, parent_context: Context | None =
 
     entity_path = get_value("entity_path")
     if entity_path is not None:
-        span.set_attribute(SpanAttributes.TRACELOOP_ENTITY_PATH, str(entity_path))
+        span.set_attribute(SpanAttributes.FORTIFYROOT_ENTITY_PATH, str(entity_path))
 
     association_properties = get_value("association_properties")
     if association_properties is not None and isinstance(association_properties, dict):
@@ -400,35 +400,35 @@ def default_span_processor_on_start(span: Span, parent_context: Context | None =
         managed_prompt = get_value("managed_prompt")
         if managed_prompt is not None:
             span.set_attribute(
-                SpanAttributes.TRACELOOP_PROMPT_MANAGED, str(managed_prompt)
+                SpanAttributes.FORTIFYROOT_PROMPT_MANAGED, str(managed_prompt)
             )
 
         prompt_key = get_value("prompt_key")
         if prompt_key is not None:
-            span.set_attribute(SpanAttributes.TRACELOOP_PROMPT_KEY, str(prompt_key))
+            span.set_attribute(SpanAttributes.FORTIFYROOT_PROMPT_KEY, str(prompt_key))
 
         prompt_version = get_value("prompt_version")
         if prompt_version is not None:
             span.set_attribute(
-                SpanAttributes.TRACELOOP_PROMPT_VERSION, str(prompt_version)
+                SpanAttributes.FORTIFYROOT_PROMPT_VERSION, str(prompt_version)
             )
 
         prompt_version_name = get_value("prompt_version_name")
         if prompt_version_name is not None:
             span.set_attribute(
-                SpanAttributes.TRACELOOP_PROMPT_VERSION_NAME, str(prompt_version_name)
+                SpanAttributes.FORTIFYROOT_PROMPT_VERSION_NAME, str(prompt_version_name)
             )
 
         prompt_version_hash = get_value("prompt_version_hash")
         if prompt_version_hash is not None:
             span.set_attribute(
-                SpanAttributes.TRACELOOP_PROMPT_VERSION_HASH, str(prompt_version_hash)
+                SpanAttributes.FORTIFYROOT_PROMPT_VERSION_HASH, str(prompt_version_hash)
             )
 
         prompt_template = get_value("prompt_template")
         if prompt_template is not None:
             span.set_attribute(
-                SpanAttributes.TRACELOOP_PROMPT_TEMPLATE, str(prompt_template)
+                SpanAttributes.FORTIFYROOT_PROMPT_TEMPLATE, str(prompt_template)
             )
 
         prompt_template_variables = get_value("prompt_template_variables")
@@ -437,7 +437,7 @@ def default_span_processor_on_start(span: Span, parent_context: Context | None =
         ):
             for key, value in prompt_template_variables.items():
                 span.set_attribute(
-                    f"{SpanAttributes.TRACELOOP_PROMPT_TEMPLATE_VARIABLES}.{key}",
+                    f"{SpanAttributes.FORTIFYROOT_PROMPT_TEMPLATE_VARIABLES}.{key}",
                     value,
                 )
 
@@ -1191,17 +1191,17 @@ def metrics_common_attributes():
     common_attributes = {}
     workflow_name = get_value("workflow_name")
     if workflow_name is not None:
-        common_attributes[SpanAttributes.TRACELOOP_WORKFLOW_NAME] = workflow_name
+        common_attributes[SpanAttributes.FORTIFYROOT_WORKFLOW_NAME] = workflow_name
 
     entity_name = get_value("entity_name")
     if entity_name is not None:
-        common_attributes[SpanAttributes.TRACELOOP_ENTITY_NAME] = entity_name
+        common_attributes[SpanAttributes.FORTIFYROOT_ENTITY_NAME] = entity_name
 
     association_properties = get_value("association_properties")
     if association_properties is not None:
         for key, value in association_properties.items():
             common_attributes[
-                f"{SpanAttributes.TRACELOOP_ASSOCIATION_PROPERTIES}.{key}"
+                f"{SpanAttributes.FORTIFYROOT_ASSOCIATION_PROPERTIES}.{key}"
             ] = value
 
     return common_attributes
