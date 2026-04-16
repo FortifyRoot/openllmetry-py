@@ -239,7 +239,7 @@ def test_prompt_management(exporter, openai_client):
         == "Tell me a joke about OpenTelemetry, pirate style"
     )
     assert open_ai_span.attributes.get(f"{GenAIAttributes.GEN_AI_COMPLETION}.0.content")
-    assert open_ai_span.attributes.get("traceloop.prompt.key") == "joke_generator"
+    assert open_ai_span.attributes.get("fortifyroot.prompt.key") == "joke_generator"
 
 
 @pytest.mark.vcr
