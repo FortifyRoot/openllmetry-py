@@ -104,7 +104,16 @@ def chat_wrapper(
         run_async(_handle_request(span, kwargs, instance))
         try:
             start_time = time.time()
-            response = wrapped(*args, **kwargs)
+            token = context_api.attach(
+                context_api.set_value(
+                    SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY,
+                    True,
+                )
+            )
+            try:
+                response = wrapped(*args, **kwargs)
+            finally:
+                context_api.detach(token)
             end_time = time.time()
         except Exception as e:  # pylint: disable=broad-except
             end_time = time.time()
@@ -205,7 +214,16 @@ async def achat_wrapper(
 
         try:
             start_time = time.time()
-            response = await wrapped(*args, **kwargs)
+            token = context_api.attach(
+                context_api.set_value(
+                    SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY,
+                    True,
+                )
+            )
+            try:
+                response = await wrapped(*args, **kwargs)
+            finally:
+                context_api.detach(token)
             end_time = time.time()
         except Exception as e:  # pylint: disable=broad-except
             end_time = time.time()
@@ -752,49 +770,59 @@ class ChatStream(ObjectProxy):
 
     @dont_throw
     def _process_complete_response(self):
-        _set_streaming_token_metrics(
-            self._request_kwargs,
-            self._complete_response,
-            self._span,
-            self._token_counter,
-            self._shared_attributes(),
-        )
+        with self._cleanup_lock:
+            if self._cleanup_completed:
+                logger.debug("ChatStream complete response already processed, skipping")
+                return
 
-        # choice metrics
-        if self._choice_counter and self._complete_response.get("choices"):
-            _set_choice_counter_metrics(
-                self._choice_counter,
-                self._complete_response.get("choices"),
+            if not self._span or not self._span.is_recording():
+                self._cleanup_completed = True
+                logger.debug("ChatStream span already ended before complete response")
+                return
+
+            _set_streaming_token_metrics(
+                self._request_kwargs,
+                self._complete_response,
+                self._span,
+                self._token_counter,
                 self._shared_attributes(),
             )
 
-        # duration metrics
-        if self._start_time and isinstance(self._start_time, (float, int)):
-            duration = time.time() - self._start_time
-        else:
-            duration = None
-        if duration and isinstance(duration, (float, int)) and self._duration_histogram:
-            self._duration_histogram.record(
-                duration, attributes=self._shared_attributes()
-            )
-        if self._streaming_time_to_generate and self._time_of_first_token:
-            self._streaming_time_to_generate.record(
-                time.time() - self._time_of_first_token,
-                attributes=self._shared_attributes(),
-            )
+            # choice metrics
+            if self._choice_counter and self._complete_response.get("choices"):
+                _set_choice_counter_metrics(
+                    self._choice_counter,
+                    self._complete_response.get("choices"),
+                    self._shared_attributes(),
+                )
 
-        _set_response_attributes(self._span, self._complete_response)
-        if should_emit_events():
-            for choice in self._complete_response.get("choices", []):
-                emit_event(_parse_choice_event(choice))
-        else:
-            if should_send_prompts():
-                _set_completions(
-                    self._span, self._complete_response.get("choices"))
+            # duration metrics
+            if self._start_time and isinstance(self._start_time, (float, int)):
+                duration = time.time() - self._start_time
+            else:
+                duration = None
+            if duration and isinstance(duration, (float, int)) and self._duration_histogram:
+                self._duration_histogram.record(
+                    duration, attributes=self._shared_attributes()
+                )
+            if self._streaming_time_to_generate and self._time_of_first_token:
+                self._streaming_time_to_generate.record(
+                    time.time() - self._time_of_first_token,
+                    attributes=self._shared_attributes(),
+                )
 
-        self._span.set_status(Status(StatusCode.OK))
-        self._span.end()
-        self._cleanup_completed = True
+            _set_response_attributes(self._span, self._complete_response)
+            if should_emit_events():
+                for choice in self._complete_response.get("choices", []):
+                    emit_event(_parse_choice_event(choice))
+            else:
+                if should_send_prompts():
+                    _set_completions(
+                        self._span, self._complete_response.get("choices"))
+
+            self._span.set_status(Status(StatusCode.OK))
+            self._span.end()
+            self._cleanup_completed = True
 
     @dont_throw
     def _ensure_cleanup(self):

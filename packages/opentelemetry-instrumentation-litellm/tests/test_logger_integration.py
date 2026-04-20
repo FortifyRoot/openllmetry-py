@@ -145,6 +145,55 @@ async def test_async_logger_masks_non_streaming_completion():
     assert response.choices[0].message.content == "[SECRET.token]"
 
 
+@pytest.mark.asyncio
+async def test_async_logger_skips_response_already_processed_by_wrapper():
+    """Late LiteLLM worker callbacks must not re-run safety on a response
+    already handled by FR finalization."""
+    from opentelemetry.instrumentation.litellm import _invoke_acompletion
+
+    exp, tracer = _make_tracer()
+    calls = []
+
+    def handler(context):
+        calls.append(context.text)
+        if context.text == "token-abc":
+            return _completion_handler("[SECRET.token]", context)
+        return None
+
+    register_completion_safety_handler(handler)
+
+    async def wrapped(*args, **kwargs):
+        return SimpleNamespace(
+            model="gpt-4o-mini",
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content="token-abc"),
+                    text="token-abc",
+                    finish_reason="stop",
+                )
+            ],
+        )
+
+    response = await _invoke_acompletion(
+        tracer,
+        wrapped,
+        (),
+        {"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert response.choices[0].message.content == "[SECRET.token]"
+    assert calls == ["token-abc"]
+
+    # Simulate LiteLLM's async logging worker flushing after FR already ended
+    # the span. The marker should make this a no-op.
+    logger = _FortifyRootCompletionLogger()
+    await logger.async_log_success_event({}, response, None, None)
+
+    assert calls == ["token-abc"]
+    spans = exp.get_finished_spans()
+    assert len(spans) == 1
+    assert len(spans[0].events) == 1
+
+
 # ---------------------------------------------------------------------------
 # Logger uses current OTel span for finding emission
 # ---------------------------------------------------------------------------
@@ -274,3 +323,77 @@ def test_fr_span_has_safety_wrapper_role():
     assert spans[0].name == "fortifyroot.litellm.safety"
     assert spans[0].attributes["fortifyroot.span.role"] == "safety_wrapper"
     assert spans[0].attributes["gen_ai.system"] == "litellm"
+
+
+def test_native_otel_marker_requires_litellm_request_span_flag(monkeypatch):
+    """Do not mark the safety span unless LiteLLM will emit litellm_request."""
+    from opentelemetry.instrumentation.litellm import _invoke_completion
+    import litellm
+    import litellm.integrations.opentelemetry as native_otel
+
+    class DummyOpenTelemetry:
+        pass
+
+    original_callbacks = list(getattr(litellm, "callbacks", []))
+    monkeypatch.setattr(native_otel, "OpenTelemetry", DummyOpenTelemetry)
+    monkeypatch.delenv("USE_OTEL_LITELLM_REQUEST_SPAN", raising=False)
+
+    try:
+        litellm.callbacks = [DummyOpenTelemetry()]
+        exp, tracer = _make_tracer()
+
+        def wrapped(*args, **kwargs):
+            return SimpleNamespace(
+                model="gpt-4o",
+                usage=None,
+                choices=[SimpleNamespace(message=SimpleNamespace(content="reply"), text="reply")],
+            )
+
+        _invoke_completion(
+            tracer,
+            wrapped,
+            (),
+            {"model": "gpt-4o", "messages": [{"role": "user", "content": "hi"}]},
+        )
+
+        span = exp.get_finished_spans()[0]
+        assert "fortifyroot.span.has_native_otel_child" not in span.attributes
+    finally:
+        litellm.callbacks = original_callbacks
+
+
+def test_native_otel_marker_set_when_litellm_request_span_enabled(monkeypatch):
+    """Mark the safety span when LiteLLM is configured to emit litellm_request."""
+    from opentelemetry.instrumentation.litellm import _invoke_completion
+    import litellm
+    import litellm.integrations.opentelemetry as native_otel
+
+    class DummyOpenTelemetry:
+        pass
+
+    original_callbacks = list(getattr(litellm, "callbacks", []))
+    monkeypatch.setattr(native_otel, "OpenTelemetry", DummyOpenTelemetry)
+    monkeypatch.setenv("USE_OTEL_LITELLM_REQUEST_SPAN", "true")
+
+    try:
+        litellm.callbacks = [DummyOpenTelemetry()]
+        exp, tracer = _make_tracer()
+
+        def wrapped(*args, **kwargs):
+            return SimpleNamespace(
+                model="gpt-4o",
+                usage=None,
+                choices=[SimpleNamespace(message=SimpleNamespace(content="reply"), text="reply")],
+            )
+
+        _invoke_completion(
+            tracer,
+            wrapped,
+            (),
+            {"model": "gpt-4o", "messages": [{"role": "user", "content": "hi"}]},
+        )
+
+        span = exp.get_finished_spans()[0]
+        assert span.attributes["fortifyroot.span.has_native_otel_child"] is True
+    finally:
+        litellm.callbacks = original_callbacks

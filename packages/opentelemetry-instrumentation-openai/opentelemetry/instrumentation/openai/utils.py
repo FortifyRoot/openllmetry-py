@@ -4,12 +4,14 @@ import os
 import threading
 import traceback
 from contextlib import asynccontextmanager
+from importlib import import_module
 from importlib.metadata import version
 from packaging import version as pkg_version
 
 from opentelemetry import context as context_api
 from opentelemetry._logs import Logger
 from opentelemetry.instrumentation.openai.shared.config import Config
+from opentelemetry.instrumentation.utils import unwrap
 
 import openai
 
@@ -158,6 +160,18 @@ def dont_throw(func):
             Config.exception_logger(e)
 
     return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
+
+
+def unwrap_dotted_method(module, dotted_method):
+    """Unwrap methods registered as ``Class.method`` via wrap_function_wrapper."""
+    try:
+        owner = import_module(module)
+        parts = dotted_method.split(".")
+        for part in parts[:-1]:
+            owner = getattr(owner, part)
+        unwrap(owner, parts[-1])
+    except (AttributeError, ImportError, ModuleNotFoundError):
+        pass
 
 
 def run_async(method):

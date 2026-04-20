@@ -107,13 +107,21 @@ def _completion_result(masked_text, context):
 
 
 def test_sync_completion_masks_prompt_and_sets_span_attributes():
-    """Prompt is masked by _invoke_completion; completion safety is handled by the
-    logger (not by _finalize_response). Span attributes reflect the response as
-    returned from the LLM (pre-masked by the logger in production)."""
+    """Prompt and completion safety are deterministic in the wrapper.
+
+    The LiteLLM callback may still win the race in production and mask first,
+    but finalization must also handle a raw response so async/global-worker
+    teardown cannot leak unmasked completion text to the caller.
+    """
     exporter, tracer = _test_tracer()
     register_prompt_safety_handler(
         lambda context: _prompt_result("[PII.email]", context)
         if context.location == SafetyLocation.PROMPT and context.text == "secret"
+        else None
+    )
+    register_completion_safety_handler(
+        lambda context: _completion_result("[SECRET.token]", context)
+        if context.location == SafetyLocation.COMPLETION and context.text == "token-abc"
         else None
     )
 
@@ -122,14 +130,13 @@ def test_sync_completion_masks_prompt_and_sets_span_attributes():
     def wrapped(*args, **kwargs):
         assert kwargs["messages"][0]["content"] == "[PII.email]"
         assert context_api.get_value(SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY) is True
-        # Simulate logger having already masked the response (as in production).
         return ModelResponse(
             model="gpt-4o-mini",
             usage={"prompt_tokens": 3, "completion_tokens": 5, "total_tokens": 8},
             choices=[
                 {
                     "finish_reason": "stop",
-                    "message": {"role": "assistant", "content": "[SECRET.token]"},
+                    "message": {"role": "assistant", "content": "token-abc"},
                 }
             ],
         )
@@ -153,8 +160,8 @@ def test_sync_completion_masks_prompt_and_sets_span_attributes():
     assert span.attributes[f"{SpanAttributes.LLM_PROMPTS}.0.content"] == "[PII.email]"
     assert span.attributes[f"{SpanAttributes.LLM_COMPLETIONS}.0.content"] == "[SECRET.token]"
     assert span.attributes[SpanAttributes.LLM_USAGE_TOTAL_TOKENS] == 8
-    # One prompt-safety finding event (completion safety handled by logger).
-    assert len(span.events) == 1
+    # One prompt-safety finding and one completion-safety finding.
+    assert len(span.events) == 2
     assert span.attributes["fortifyroot.span.role"] == "safety_wrapper"
 
 
@@ -165,15 +172,19 @@ def test_sync_text_completion_masks_text_choices():
         if context.location == SafetyLocation.PROMPT and context.text == "secret"
         else None
     )
+    register_completion_safety_handler(
+        lambda context: _completion_result("[SECRET.token]", context)
+        if context.location == SafetyLocation.COMPLETION and context.text == "token-abc"
+        else None
+    )
 
     def wrapped(*args, **kwargs):
         assert args[0] == "[PII.email]"
         assert kwargs["model"] == "gpt-3.5-turbo-instruct"
         assert context_api.get_value(SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY) is True
-        # Response pre-masked (as logger would do in production).
         return TextCompletionResponse(
             model="gpt-3.5-turbo-instruct",
-            choices=[{"text": "[SECRET.token]"}],
+            choices=[{"text": "token-abc"}],
         )
 
     response = _invoke_completion(
@@ -194,6 +205,7 @@ def test_sync_text_completion_masks_text_choices():
     assert span.attributes[GenAIAttributes.GEN_AI_REQUEST_MODEL] == "gpt-3.5-turbo-instruct"
     assert span.attributes[f"{SpanAttributes.LLM_PROMPTS}.0.content"] == "[PII.email]"
     assert span.attributes[f"{SpanAttributes.LLM_COMPLETIONS}.0.content"] == "[SECRET.token]"
+    assert len(span.events) == 2
 
 
 @pytest.mark.asyncio
@@ -204,6 +216,11 @@ async def test_async_completion_masks_prompt_and_response():
         if context.location == SafetyLocation.PROMPT and context.text == "secret"
         else None
     )
+    register_completion_safety_handler(
+        lambda context: _completion_result("[SECRET.token]", context)
+        if context.location == SafetyLocation.COMPLETION and context.text == "token-abc"
+        else None
+    )
 
     async def wrapped(*args, **kwargs):
         assert kwargs["messages"][0]["content"] == "[PII.email]"
@@ -212,7 +229,7 @@ async def test_async_completion_masks_prompt_and_response():
             choices=[
                 {
                     "finish_reason": "stop",
-                    "message": {"role": "assistant", "content": "[SECRET.token]"},
+                    "message": {"role": "assistant", "content": "token-abc"},
                 }
             ],
         )
@@ -230,6 +247,7 @@ async def test_async_completion_masks_prompt_and_response():
     span = spans[0]
     assert span.name == _FR_SPAN_NAME
     assert span.attributes[f"{SpanAttributes.LLM_COMPLETIONS}.0.content"] == "[SECRET.token]"
+    assert len(span.events) == 2
 
 
 @pytest.mark.asyncio
@@ -240,13 +258,18 @@ async def test_async_text_completion_masks_prompt_and_response():
         if context.location == SafetyLocation.PROMPT and context.text == "secret"
         else None
     )
+    register_completion_safety_handler(
+        lambda context: _completion_result("[SECRET.token]", context)
+        if context.location == SafetyLocation.COMPLETION and context.text == "token-abc"
+        else None
+    )
 
     async def wrapped(*args, **kwargs):
         assert args[0] == "[PII.email]"
         assert kwargs["model"] == "gpt-3.5-turbo-instruct"
         return TextCompletionResponse(
             model="gpt-3.5-turbo-instruct",
-            choices=[{"text": "[SECRET.token]"}],
+            choices=[{"text": "token-abc"}],
         )
 
     response = await _invoke_acompletion(
@@ -262,6 +285,7 @@ async def test_async_text_completion_masks_prompt_and_response():
     assert span.name == _FR_SPAN_NAME
     assert span.attributes[f"{SpanAttributes.LLM_PROMPTS}.0.content"] == "[PII.email]"
     assert span.attributes[f"{SpanAttributes.LLM_COMPLETIONS}.0.content"] == "[SECRET.token]"
+    assert len(span.events) == 2
 
 
 @pytest.mark.asyncio
@@ -272,6 +296,11 @@ async def test_sync_wrapper_handles_awaitable_response():
         if context.location == SafetyLocation.PROMPT and context.text == "secret"
         else None
     )
+    register_completion_safety_handler(
+        lambda context: _completion_result("[SECRET.token]", context)
+        if context.location == SafetyLocation.COMPLETION and context.text == "token-abc"
+        else None
+    )
 
     async def response_coro():
         assert context_api.get_value(SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY) is True
@@ -280,7 +309,7 @@ async def test_sync_wrapper_handles_awaitable_response():
             choices=[
                 {
                     "finish_reason": "stop",
-                    "message": {"role": "assistant", "content": "[SECRET.token]"},
+                    "message": {"role": "assistant", "content": "token-abc"},
                 }
             ],
         )
@@ -303,6 +332,7 @@ async def test_sync_wrapper_handles_awaitable_response():
     spans = exporter.get_finished_spans()
     assert len(spans) == 1
     assert spans[0].attributes[f"{SpanAttributes.LLM_COMPLETIONS}.0.content"] == "[SECRET.token]"
+    assert len(spans[0].events) == 2
 
 
 @pytest.mark.asyncio
@@ -940,8 +970,8 @@ def test_is_sync_streaming_response_detects_custom_iterators():
     assert is_sync_streaming_response({"stream": False}, CustomStreamWrapper()) is False
 
 
-def test_is_async_streaming_response_detects_coroutines():
-    """Coroutines and async generators are detected when stream=True."""
+def test_is_async_streaming_response_detects_async_response_types():
+    """Coroutines, async generators, and async iterators are detected when stream=True."""
     async def _coro():
         pass
 
@@ -961,6 +991,18 @@ def test_is_async_streaming_response_detects_coroutines():
     import asyncio
     asyncio.get_event_loop().run_until_complete(ag.aclose())
 
+    class CustomAsyncStreamWrapper:
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            raise StopAsyncIteration
+
+    wrapper = CustomAsyncStreamWrapper()
+    assert is_async_streaming_response({"stream": True}, wrapper) is True
+    assert is_async_streaming_response({}, wrapper) is False
+    assert is_async_streaming_response({"stream": False}, wrapper) is False
+
 
 def test_is_sync_streaming_response_rejects_async_types():
     """Async generators and coroutines should not be sync streaming."""
@@ -978,6 +1020,7 @@ def test_is_sync_streaming_response_rejects_async_types():
     coro = _coro()
     assert is_sync_streaming_response({"stream": True}, coro) is False
     coro.close()
+
 
 
 # ---------------------------------------------------------------------------

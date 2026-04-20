@@ -10,7 +10,11 @@ from opentelemetry.semconv._incubating.attributes import (
 from opentelemetry.semconv_ai import SpanAttributes
 from opentelemetry.trace import StatusCode
 
-from .utils import assert_request_contains_tracecontext, spy_decorator
+from .utils import (
+    assert_openai_exception_span,
+    assert_request_contains_tracecontext,
+    spy_decorator,
+)
 
 
 @pytest.mark.vcr
@@ -611,14 +615,7 @@ def test_embeddings_exception(instrument_legacy, span_exporter, openai_client):
         "openai.embeddings",
     ]
     open_ai_span = spans[0]
-    assert open_ai_span.status.status_code == StatusCode.ERROR
-    assert open_ai_span.status.description.startswith("Error code: 401")
-    events = open_ai_span.events
-    assert len(events) == 1
-    event = events[0]
-    assert event.name == "exception"
-    assert event.attributes["exception.type"] == "openai.AuthenticationError"
-    assert event.attributes["exception.message"].startswith("Error code: 401")
+    assert_openai_exception_span(open_ai_span)
 
 
 @pytest.mark.asyncio
@@ -635,14 +632,7 @@ async def test_async_embeddings_exception(instrument_legacy, span_exporter, asyn
         "openai.embeddings",
     ]
     open_ai_span = spans[0]
-    assert open_ai_span.status.status_code == StatusCode.ERROR
-    assert open_ai_span.status.description.startswith("Error code: 401")
-    events = open_ai_span.events
-    assert len(events) == 1
-    event = events[0]
-    assert event.name == "exception"
-    assert event.attributes["exception.type"] == "openai.AuthenticationError"
-    assert event.attributes["exception.message"].startswith("Error code: 401")
+    assert_openai_exception_span(open_ai_span)
 
 
 def assert_message_in_logs(log: ReadableLogRecord, event_name: str, expected_content: dict):

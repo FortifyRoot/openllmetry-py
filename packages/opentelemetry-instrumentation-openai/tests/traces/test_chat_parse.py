@@ -9,6 +9,8 @@ from opentelemetry.semconv_ai import SpanAttributes
 from opentelemetry.sdk.trace import Span
 from opentelemetry.trace import StatusCode
 
+from .utils import assert_openai_exception_span
+
 
 class StructuredAnswer(BaseModel):
     rating: int
@@ -548,18 +550,7 @@ def test_parsed_completion_exception(
     assert span.attributes.get(f"{GenAIAttributes.GEN_AI_PROMPT}.0.content") == "Tell me a joke about opentelemetry"
     assert span.attributes.get(f"{GenAIAttributes.GEN_AI_PROMPT}.0.role") == "user"
 
-    assert span.status.status_code == StatusCode.ERROR
-    assert span.status.description.startswith("Error code: 401")
-    events = span.events
-    assert len(events) == 1
-    event = events[0]
-    assert event.name == "exception"
-    assert event.attributes["exception.type"] == "openai.AuthenticationError"
-    assert event.attributes["exception.message"].startswith("Error code: 401")
-    assert "Traceback (most recent call last):" in event.attributes["exception.stacktrace"]
-    assert "openai.AuthenticationError" in event.attributes["exception.stacktrace"]
-    assert "invalid_api_key" in event.attributes["exception.stacktrace"]
-    assert span.attributes.get("error.type") == "AuthenticationError"
+    assert_openai_exception_span(span)
 
 
 @pytest.mark.asyncio
@@ -583,15 +574,4 @@ async def test_async_parsed_completion_exception(
     assert span.attributes.get(f"{GenAIAttributes.GEN_AI_PROMPT}.0.content") == "Tell me a joke about opentelemetry"
     assert span.attributes.get(f"{GenAIAttributes.GEN_AI_PROMPT}.0.role") == "user"
 
-    assert span.status.status_code == StatusCode.ERROR
-    assert span.status.description.startswith("Error code: 401")
-    events = span.events
-    assert len(events) == 1
-    event = events[0]
-    assert event.name == "exception"
-    assert event.attributes["exception.type"] == "openai.AuthenticationError"
-    assert event.attributes["exception.message"].startswith("Error code: 401")
-    assert "Traceback (most recent call last):" in event.attributes["exception.stacktrace"]
-    assert "openai.AuthenticationError" in event.attributes["exception.stacktrace"]
-    assert "invalid_api_key" in event.attributes["exception.stacktrace"]
-    assert span.attributes.get("error.type") == "AuthenticationError"
+    assert_openai_exception_span(span)

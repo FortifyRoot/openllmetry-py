@@ -166,7 +166,6 @@ def instrument_with_content(
     Config.use_legacy_attributes = True
     Config.event_logger = None
     os.environ.pop(TRACELOOP_TRACE_CONTENT, None)
-    instrumentor.uninstrument()
 
 
 @pytest.fixture(scope="function")
@@ -186,7 +185,6 @@ def instrument_with_no_content(
     Config.use_legacy_attributes = True
     Config.event_logger = None
     os.environ.pop(TRACELOOP_TRACE_CONTENT, None)
-    instrumentor.uninstrument()
 
 
 @pytest.fixture(autouse=True)

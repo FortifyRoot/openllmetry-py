@@ -49,6 +49,19 @@ _WRAPPED_TARGETS: set[tuple[str, str]] = set()
 logger = logging.getLogger(__name__)
 
 
+def _infer_llm_provider(model) -> str | None:
+    model_name = str(model or "").lower()
+    # TODO(ST-6 follow-up): MVP support here is intentionally limited to the
+    # providers exercised in ST-6 (OpenAI + Anthropic). Expand this inference
+    # when we certify more LlamaIndex-backed providers so safety-emitted
+    # wrapper spans continue to carry provider/model attribution for them.
+    if "claude" in model_name or "anthropic" in model_name:
+        return "anthropic"
+    if "gpt" in model_name or model_name.startswith(("o1", "o3", "o4")):
+        return "openai"
+    return None
+
+
 def instrument_llm_safety_wrappers():
     global _WRAPPERS_INSTALLED
     with _WRAPPERS_LOCK:
@@ -259,7 +272,11 @@ def apply_completion_start_span_attributes(event, span):
     span.set_attribute(
         SpanAttributes.LLM_REQUEST_TYPE, LLMRequestTypeValues.COMPLETION.value
     )
-    span.set_attribute(GenAIAttributes.GEN_AI_REQUEST_MODEL, model_dict.get("model"))
+    model = model_dict.get("model")
+    span.set_attribute(GenAIAttributes.GEN_AI_REQUEST_MODEL, model)
+    provider = _infer_llm_provider(model)
+    if provider:
+        span.set_attribute(GenAIAttributes.GEN_AI_SYSTEM, provider)
     span.set_attribute(
         GenAIAttributes.GEN_AI_REQUEST_TEMPERATURE,
         model_dict.get("temperature"),
@@ -513,7 +530,11 @@ def _set_completion_response_model_attributes(response, span):
     usage = get_object_value(raw, "usage")
     if usage is not None:
         completion_tokens = get_object_value(usage, "completion_tokens")
+        if completion_tokens is None:
+            completion_tokens = get_object_value(usage, "output_tokens")
         prompt_tokens = get_object_value(usage, "prompt_tokens")
+        if prompt_tokens is None:
+            prompt_tokens = get_object_value(usage, "input_tokens")
         total_tokens = get_object_value(usage, "total_tokens")
         if completion_tokens is not None:
             span.set_attribute(
@@ -529,6 +550,11 @@ def _set_completion_response_model_attributes(response, span):
             span.set_attribute(
                 SpanAttributes.LLM_USAGE_TOTAL_TOKENS,
                 int(total_tokens),
+            )
+        elif prompt_tokens is not None and completion_tokens is not None:
+            span.set_attribute(
+                SpanAttributes.LLM_USAGE_TOTAL_TOKENS,
+                int(prompt_tokens) + int(completion_tokens),
             )
 
 
