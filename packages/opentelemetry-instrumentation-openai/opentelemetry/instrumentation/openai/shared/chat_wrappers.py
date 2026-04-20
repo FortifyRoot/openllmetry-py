@@ -104,7 +104,16 @@ def chat_wrapper(
         run_async(_handle_request(span, kwargs, instance))
         try:
             start_time = time.time()
-            response = wrapped(*args, **kwargs)
+            token = context_api.attach(
+                context_api.set_value(
+                    SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY,
+                    True,
+                )
+            )
+            try:
+                response = wrapped(*args, **kwargs)
+            finally:
+                context_api.detach(token)
             end_time = time.time()
         except Exception as e:  # pylint: disable=broad-except
             end_time = time.time()
@@ -205,7 +214,16 @@ async def achat_wrapper(
 
         try:
             start_time = time.time()
-            response = await wrapped(*args, **kwargs)
+            token = context_api.attach(
+                context_api.set_value(
+                    SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY,
+                    True,
+                )
+            )
+            try:
+                response = await wrapped(*args, **kwargs)
+            finally:
+                context_api.detach(token)
             end_time = time.time()
         except Exception as e:  # pylint: disable=broad-except
             end_time = time.time()

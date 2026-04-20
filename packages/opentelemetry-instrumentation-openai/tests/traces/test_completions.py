@@ -9,7 +9,11 @@ from opentelemetry.semconv._incubating.attributes import (
 from opentelemetry.trace import StatusCode
 from opentelemetry.semconv_ai import SpanAttributes
 
-from .utils import assert_request_contains_tracecontext, spy_decorator
+from .utils import (
+    assert_openai_exception_span,
+    assert_request_contains_tracecontext,
+    spy_decorator,
+)
 
 
 @pytest.mark.vcr
@@ -899,18 +903,7 @@ def test_completion_exception(instrument_legacy, span_exporter, openai_client):
         open_ai_span.attributes[f"{GenAIAttributes.GEN_AI_PROMPT}.0.user"]
         == "Tell me a joke about opentelemetry"
     )
-    assert open_ai_span.status.status_code == StatusCode.ERROR
-    assert open_ai_span.status.description.startswith("Error code: 401")
-    events = open_ai_span.events
-    assert len(events) == 1
-    event = events[0]
-    assert event.name == "exception"
-    assert event.attributes["exception.type"] == "openai.AuthenticationError"
-    assert event.attributes["exception.message"].startswith("Error code: 401")
-    assert "Traceback (most recent call last):" in event.attributes["exception.stacktrace"]
-    assert "openai.AuthenticationError" in event.attributes["exception.stacktrace"]
-    assert "invalid_api_key" in event.attributes["exception.stacktrace"]
-    assert open_ai_span.attributes.get("error.type") == "AuthenticationError"
+    assert_openai_exception_span(open_ai_span)
 
 
 @pytest.mark.asyncio
@@ -931,18 +924,7 @@ async def test_async_completion_exception(instrument_legacy, span_exporter, asyn
         open_ai_span.attributes[f"{GenAIAttributes.GEN_AI_PROMPT}.0.user"]
         == "Tell me a joke about opentelemetry"
     )
-    assert open_ai_span.status.status_code == StatusCode.ERROR
-    assert open_ai_span.status.description.startswith("Error code: 401")
-    events = open_ai_span.events
-    assert len(events) == 1
-    event = events[0]
-    assert event.name == "exception"
-    assert event.attributes["exception.type"] == "openai.AuthenticationError"
-    assert event.attributes["exception.message"].startswith("Error code: 401")
-    assert "Traceback (most recent call last):" in event.attributes["exception.stacktrace"]
-    assert "openai.AuthenticationError" in event.attributes["exception.stacktrace"]
-    assert "invalid_api_key" in event.attributes["exception.stacktrace"]
-    assert open_ai_span.attributes.get("error.type") == "AuthenticationError"
+    assert_openai_exception_span(open_ai_span)
 
 
 def assert_message_in_logs(log: ReadableLogRecord, event_name: str, expected_content: dict):

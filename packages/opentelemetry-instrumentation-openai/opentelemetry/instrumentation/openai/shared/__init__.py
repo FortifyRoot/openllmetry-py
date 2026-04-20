@@ -27,6 +27,8 @@ _PYDANTIC_VERSION = version("pydantic")
 
 logger = logging.getLogger(__name__)
 
+LLM_REQUEST_STRUCTURED_OUTPUT_SCHEMA = "gen_ai.request.structured_output_schema"
+
 
 def _set_span_attribute(span, name, value):
     if value is None or value == "":
@@ -157,7 +159,7 @@ def _set_request_attributes(span, kwargs, instance=None):
             if schema:
                 _set_span_attribute(
                     span,
-                    SpanAttributes.LLM_REQUEST_STRUCTURED_OUTPUT_SCHEMA,
+                    LLM_REQUEST_STRUCTURED_OUTPUT_SCHEMA,
                     json.dumps(schema),
                 )
         elif (
@@ -169,7 +171,7 @@ def _set_request_attributes(span, kwargs, instance=None):
         ):
             _set_span_attribute(
                 span,
-                SpanAttributes.LLM_REQUEST_STRUCTURED_OUTPUT_SCHEMA,
+                LLM_REQUEST_STRUCTURED_OUTPUT_SCHEMA,
                 json.dumps(response_format.model_json_schema()),
             )
         else:
@@ -185,7 +187,7 @@ def _set_request_attributes(span, kwargs, instance=None):
             if schema:
                 _set_span_attribute(
                     span,
-                    SpanAttributes.LLM_REQUEST_STRUCTURED_OUTPUT_SCHEMA,
+                    LLM_REQUEST_STRUCTURED_OUTPUT_SCHEMA,
                     schema,
                 )
 

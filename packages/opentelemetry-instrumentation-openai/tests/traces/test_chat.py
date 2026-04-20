@@ -11,6 +11,7 @@ from openai.types.chat.chat_completion_message_tool_call import (
 from wrapt import BoundFunctionWrapper
 from opentelemetry.sdk._logs import ReadableLogRecord
 from opentelemetry.instrumentation.openai import OpenAIInstrumentor
+from opentelemetry.instrumentation.openai.shared.config import Config
 from opentelemetry.semconv._incubating.attributes import (
     gen_ai_attributes as GenAIAttributes,
 )
@@ -18,23 +19,53 @@ from opentelemetry.semconv_ai import SpanAttributes
 from opentelemetry.trace import StatusCode
 from opentelemetry.instrumentation.openai.utils import is_reasoning_supported
 
-from .utils import assert_request_contains_tracecontext, spy_decorator
+from .utils import (
+    assert_openai_exception_span,
+    assert_request_contains_tracecontext,
+    spy_decorator,
+)
 
 
-def test_openai_v1_uninstrument_removes_chat_completion_wrapper():
-    instrumentor = OpenAIInstrumentor()
-    if instrumentor.is_instrumented_by_opentelemetry:
+def test_openai_v1_uninstrument_removes_chat_completion_wrapper(
+    tracer_provider, meter_provider
+):
+    prior_config = {
+        "enrich_assistant": Config.enrich_assistant,
+        "exception_logger": Config.exception_logger,
+        "get_common_metrics_attributes": Config.get_common_metrics_attributes,
+        "upload_base64_image": Config.upload_base64_image,
+        "enable_trace_context_propagation": Config.enable_trace_context_propagation,
+        "use_legacy_attributes": Config.use_legacy_attributes,
+    }
+    instrumentor = OpenAIInstrumentor(**prior_config)
+    restore_session_instrumentation = instrumentor.is_instrumented_by_opentelemetry
+
+    if restore_session_instrumentation:
         instrumentor.uninstrument()
 
     assert not isinstance(Completions.create, BoundFunctionWrapper)
 
-    instrumentor.instrument()
     try:
+        instrumentor.instrument(
+            tracer_provider=tracer_provider,
+            meter_provider=meter_provider,
+        )
         assert isinstance(Completions.create, BoundFunctionWrapper)
     finally:
         instrumentor.uninstrument()
+        if restore_session_instrumentation:
+            instrumentor.instrument(
+                tracer_provider=tracer_provider,
+                meter_provider=meter_provider,
+            )
+        Config.enrich_assistant = prior_config["enrich_assistant"]
+        Config.exception_logger = prior_config["exception_logger"]
+        Config.get_common_metrics_attributes = prior_config["get_common_metrics_attributes"]
+        Config.upload_base64_image = prior_config["upload_base64_image"]
+        Config.enable_trace_context_propagation = prior_config["enable_trace_context_propagation"]
+        Config.use_legacy_attributes = prior_config["use_legacy_attributes"]
 
-    assert not isinstance(Completions.create, BoundFunctionWrapper)
+    assert isinstance(Completions.create, BoundFunctionWrapper) == restore_session_instrumentation
 
 
 @pytest.mark.vcr
@@ -1563,18 +1594,7 @@ def test_chat_exception(instrument_legacy, span_exporter, openai_client):
     )
     assert open_ai_span.attributes.get(
         SpanAttributes.LLM_IS_STREAMING) is False
-    assert open_ai_span.status.status_code == StatusCode.ERROR
-    assert open_ai_span.status.description.startswith("Error code: 401")
-    events = open_ai_span.events
-    assert len(events) == 1
-    event = events[0]
-    assert event.name == "exception"
-    assert event.attributes["exception.type"] == "openai.AuthenticationError"
-    assert event.attributes["exception.message"].startswith("Error code: 401")
-    assert open_ai_span.attributes.get("error.type") == "AuthenticationError"
-    assert "Traceback (most recent call last):" in event.attributes["exception.stacktrace"]
-    assert "openai.AuthenticationError" in event.attributes["exception.stacktrace"]
-    assert "invalid_api_key" in event.attributes["exception.stacktrace"]
+    assert_openai_exception_span(open_ai_span)
 
 
 @pytest.mark.asyncio
@@ -1603,18 +1623,7 @@ async def test_chat_async_exception(instrument_legacy, span_exporter, async_open
     )
     assert open_ai_span.attributes.get(
         SpanAttributes.LLM_IS_STREAMING) is False
-    assert open_ai_span.status.status_code == StatusCode.ERROR
-    assert open_ai_span.status.description.startswith("Error code: 401")
-    events = open_ai_span.events
-    assert len(events) == 1
-    event = events[0]
-    assert event.name == "exception"
-    assert event.attributes["exception.type"] == "openai.AuthenticationError"
-    assert event.attributes["exception.message"].startswith("Error code: 401")
-    assert "Traceback (most recent call last):" in event.attributes["exception.stacktrace"]
-    assert "openai.AuthenticationError" in event.attributes["exception.stacktrace"]
-    assert "invalid_api_key" in event.attributes["exception.stacktrace"]
-    assert open_ai_span.attributes.get("error.type") == "AuthenticationError"
+    assert_openai_exception_span(open_ai_span)
 
 
 @pytest.mark.vcr
@@ -1648,7 +1657,7 @@ def test_chat_streaming_not_consumed(instrument_legacy, span_exporter, log_expor
     assert open_ai_span.end_time > open_ai_span.start_time
 
     assert open_ai_span.attributes.get(
-        SpanAttributes.LLM_REQUEST_MODEL) == "gpt-3.5-turbo"
+        GenAIAttributes.GEN_AI_REQUEST_MODEL) == "gpt-3.5-turbo"
     assert open_ai_span.attributes.get(SpanAttributes.LLM_IS_STREAMING) is True
     assert open_ai_span.attributes.get(
         SpanAttributes.LLM_REQUEST_TYPE) == "chat"
@@ -1729,7 +1738,7 @@ def test_chat_streaming_partial_consumption(instrument_legacy, span_exporter, lo
     assert open_ai_span.end_time is not None
 
     assert open_ai_span.attributes.get(
-        SpanAttributes.LLM_REQUEST_MODEL) == "gpt-3.5-turbo"
+        GenAIAttributes.GEN_AI_REQUEST_MODEL) == "gpt-3.5-turbo"
     assert open_ai_span.attributes.get(SpanAttributes.LLM_IS_STREAMING) is True
 
     # Should have at least one event from the consumed chunk
