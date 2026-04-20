@@ -1,12 +1,16 @@
 import asyncio
+import logging
 from unittest.mock import patch
 
 import httpx
 import pytest
+from openai.resources.chat.completions import Completions
 from openai.types.chat.chat_completion_message_tool_call import (
     ChatCompletionMessageFunctionToolCall,
 )
+from wrapt import BoundFunctionWrapper
 from opentelemetry.sdk._logs import ReadableLogRecord
+from opentelemetry.instrumentation.openai import OpenAIInstrumentor
 from opentelemetry.semconv._incubating.attributes import (
     gen_ai_attributes as GenAIAttributes,
 )
@@ -15,6 +19,22 @@ from opentelemetry.trace import StatusCode
 from opentelemetry.instrumentation.openai.utils import is_reasoning_supported
 
 from .utils import assert_request_contains_tracecontext, spy_decorator
+
+
+def test_openai_v1_uninstrument_removes_chat_completion_wrapper():
+    instrumentor = OpenAIInstrumentor()
+    if instrumentor.is_instrumented_by_opentelemetry:
+        instrumentor.uninstrument()
+
+    assert not isinstance(Completions.create, BoundFunctionWrapper)
+
+    instrumentor.instrument()
+    try:
+        assert isinstance(Completions.create, BoundFunctionWrapper)
+    finally:
+        instrumentor.uninstrument()
+
+    assert not isinstance(Completions.create, BoundFunctionWrapper)
 
 
 @pytest.mark.vcr
@@ -1754,6 +1774,43 @@ def test_chat_streaming_partial_consumption(instrument_legacy, span_exporter, lo
         f"Expected at least one streaming data point, got data points with attributes: "
         f"{[dict(dp.attributes) for dp in duration_metric.data.data_points]}"
     )
+
+
+def test_chat_stream_complete_response_noops_after_cleanup(
+    tracer_provider, span_exporter, caplog
+):
+    """Late stream finalization must not mutate an already-ended span."""
+    from opentelemetry.instrumentation.openai.shared.chat_wrappers import ChatStream
+
+    class _EmptyStream:
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            raise StopIteration
+
+    span = tracer_provider.get_tracer(__name__).start_span("openai.chat")
+    stream = ChatStream(
+        span,
+        _EmptyStream(),
+        start_time=0.0,
+        request_kwargs={"model": "gpt-3.5-turbo"},
+    )
+
+    stream._ensure_cleanup()
+    assert len(span_exporter.get_finished_spans()) == 1
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="opentelemetry.sdk.trace"):
+        stream._process_complete_response()
+
+    assert len(span_exporter.get_finished_spans()) == 1
+    ended_span_messages = [
+        record.getMessage()
+        for record in caplog.records
+        if "ended span" in record.getMessage()
+    ]
+    assert ended_span_messages == []
 
 
 @pytest.mark.vcr

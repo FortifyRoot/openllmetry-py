@@ -392,6 +392,27 @@ def test_internal_helpers_cover_kwargs_and_non_recording_paths():
     assert spans[0].attributes["gen_ai.usage.input_tokens"] == 1
     assert spans[0].attributes["gen_ai.usage.output_tokens"] == 2
     assert spans[0].attributes["llm.usage.total_tokens"] == 3
+
+    exporter, tracer = _test_span()
+    with patch("opentelemetry.instrumentation.llamaindex.safety.should_send_prompts", return_value=False):
+        with tracer.start_as_current_span("llamaindex.completion") as span:
+            apply_completion_end_safety(
+                LLMCompletionEndEvent(
+                    prompt="prompt",
+                    response=CompletionResponse(
+                        text="secret",
+                        raw={"model": "claude", "usage": {"input_tokens": 4, "output_tokens": 5}},
+                    ),
+                    span_id="span-3",
+                ),
+                span,
+            )
+
+    spans = exporter.get_finished_spans()
+    assert spans[0].attributes["gen_ai.usage.input_tokens"] == 4
+    assert spans[0].attributes["gen_ai.usage.output_tokens"] == 5
+    assert spans[0].attributes["llm.usage.total_tokens"] == 9
+
     thinking_block = SimpleNamespace(block_type="thinking", content="idea")
     assert _block_text(thinking_block) == "idea"
     assert _set_block_text(thinking_block, "updated") is True

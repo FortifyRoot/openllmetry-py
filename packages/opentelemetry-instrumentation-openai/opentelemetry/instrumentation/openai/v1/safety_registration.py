@@ -27,7 +27,7 @@ from opentelemetry.instrumentation.openai.v1.responses_wrappers import (
     responses_cancel_wrapper,
     responses_get_or_create_wrapper,
 )
-from opentelemetry.instrumentation.utils import unwrap
+from opentelemetry.instrumentation.openai.utils import unwrap_dotted_method
 
 
 def instrument_beta_safety_wrappers(
@@ -170,25 +170,25 @@ def instrument_beta_safety_wrappers(
 
 
 def uninstrument_beta_safety_wrappers():
-    unwrap("openai.resources.beta.assistants", "Assistants.create")
-    unwrap("openai.resources.beta.assistants", "AsyncAssistants.create")
-    unwrap("openai.resources.beta.chat.completions", "Completions.parse")
-    unwrap("openai.resources.beta.chat.completions", "AsyncCompletions.parse")
-    unwrap("openai.resources.beta.threads.runs", "Runs.create")
-    unwrap("openai.resources.beta.threads.runs", "AsyncRuns.create")
-    unwrap("openai.resources.beta.threads.runs", "Runs.retrieve")
-    unwrap("openai.resources.beta.threads.runs", "AsyncRuns.retrieve")
-    unwrap("openai.resources.beta.threads.runs", "Runs.create_and_stream")
-    unwrap("openai.resources.beta.threads.runs", "AsyncRuns.create_and_stream")
-    unwrap("openai.resources.beta.threads.messages", "Messages.create")
-    unwrap("openai.resources.beta.threads.messages", "AsyncMessages.create")
-    unwrap("openai.resources.beta.threads.messages", "Messages.list")
-    unwrap("openai.resources.beta.threads.messages", "AsyncMessages.list")
-    unwrap("openai.resources.responses", "Responses.create")
-    unwrap("openai.resources.responses", "Responses.retrieve")
-    unwrap("openai.resources.responses", "Responses.cancel")
-    unwrap("openai.resources.responses", "AsyncResponses.create")
-    unwrap("openai.resources.responses", "AsyncResponses.retrieve")
-    unwrap("openai.resources.responses", "AsyncResponses.cancel")
-    unwrap("openai.resources.beta.realtime.realtime", "Realtime.connect")
-    unwrap("openai.resources.beta.realtime.realtime", "AsyncRealtime.connect")
+    unwrap_dotted_method("openai.resources.beta.assistants", "Assistants.create")
+    unwrap_dotted_method("openai.resources.beta.assistants", "AsyncAssistants.create")
+    unwrap_dotted_method("openai.resources.beta.chat.completions", "Completions.parse")
+    unwrap_dotted_method("openai.resources.beta.chat.completions", "AsyncCompletions.parse")
+    unwrap_dotted_method("openai.resources.beta.threads.runs", "Runs.create")
+    unwrap_dotted_method("openai.resources.beta.threads.runs", "AsyncRuns.create")
+    unwrap_dotted_method("openai.resources.beta.threads.runs", "Runs.retrieve")
+    unwrap_dotted_method("openai.resources.beta.threads.runs", "AsyncRuns.retrieve")
+    unwrap_dotted_method("openai.resources.beta.threads.runs", "Runs.create_and_stream")
+    unwrap_dotted_method("openai.resources.beta.threads.runs", "AsyncRuns.create_and_stream")
+    unwrap_dotted_method("openai.resources.beta.threads.messages", "Messages.create")
+    unwrap_dotted_method("openai.resources.beta.threads.messages", "AsyncMessages.create")
+    unwrap_dotted_method("openai.resources.beta.threads.messages", "Messages.list")
+    unwrap_dotted_method("openai.resources.beta.threads.messages", "AsyncMessages.list")
+    unwrap_dotted_method("openai.resources.responses", "Responses.create")
+    unwrap_dotted_method("openai.resources.responses", "Responses.retrieve")
+    unwrap_dotted_method("openai.resources.responses", "Responses.cancel")
+    unwrap_dotted_method("openai.resources.responses", "AsyncResponses.create")
+    unwrap_dotted_method("openai.resources.responses", "AsyncResponses.retrieve")
+    unwrap_dotted_method("openai.resources.responses", "AsyncResponses.cancel")
+    unwrap_dotted_method("openai.resources.beta.realtime.realtime", "Realtime.connect")
+    unwrap_dotted_method("openai.resources.beta.realtime.realtime", "AsyncRealtime.connect")

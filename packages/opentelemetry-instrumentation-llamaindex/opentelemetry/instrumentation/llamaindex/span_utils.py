@@ -12,6 +12,19 @@ from opentelemetry.semconv_ai import (
 )
 
 
+def _infer_llm_provider(model) -> str | None:
+    model_name = str(model or "").lower()
+    # TODO(ST-6 follow-up): MVP support here is intentionally limited to the
+    # providers exercised in ST-6 (OpenAI + Anthropic). Expand this inference
+    # as additional LlamaIndex-backed providers are certified so delegated
+    # wrapper spans and backend LLMUsage attribution keep working for them too.
+    if "claude" in model_name or "anthropic" in model_name:
+        return "anthropic"
+    if "gpt" in model_name or model_name.startswith(("o1", "o3", "o4")):
+        return "openai"
+    return None
+
+
 @dont_throw
 def set_llm_chat_request(event, span) -> None:
     if not span.is_recording():
@@ -39,7 +52,11 @@ def set_llm_chat_request_model_attributes(event, span):
     if "llm" in model_dict:
         model_dict = model_dict.get("llm", {})
 
-    span.set_attribute(GenAIAttributes.GEN_AI_REQUEST_MODEL, model_dict.get("model"))
+    model = model_dict.get("model")
+    span.set_attribute(GenAIAttributes.GEN_AI_REQUEST_MODEL, model)
+    provider = _infer_llm_provider(model)
+    if provider:
+        span.set_attribute(GenAIAttributes.GEN_AI_SYSTEM, provider)
     span.set_attribute(
         GenAIAttributes.GEN_AI_REQUEST_TEMPERATURE, model_dict.get("temperature")
     )
@@ -93,6 +110,11 @@ def set_llm_chat_response_model_attributes(event, span):
     output_tokens = None
     total_tokens = None
 
+    # TODO(ST-6 follow-up): token extraction below currently covers the usage
+    # shapes we needed for the MVP providers/certified paths (OpenAI-style,
+    # Anthropic-style, and Cohere metadata fallback). Extend this branch as
+    # additional LlamaIndex-backed providers are added so token attribution
+    # stays correct without relying on backend heuristics.
     # Try OpenAI format first: raw.usage with completion_tokens, prompt_tokens
     usage = getattr(raw, "usage", None) or (raw.get("usage") if isinstance(raw, dict) else None)
     if usage:
@@ -100,9 +122,13 @@ def set_llm_chat_response_model_attributes(event, span):
             output_tokens = usage.completion_tokens
             input_tokens = usage.prompt_tokens
             total_tokens = usage.total_tokens
+        elif hasattr(usage, "output_tokens"):
+            output_tokens = usage.output_tokens
+            input_tokens = usage.input_tokens
+            total_tokens = getattr(usage, "total_tokens", None)
         elif isinstance(usage, dict):
-            output_tokens = usage.get("completion_tokens")
-            input_tokens = usage.get("prompt_tokens")
+            output_tokens = usage.get("completion_tokens", usage.get("output_tokens"))
+            input_tokens = usage.get("prompt_tokens", usage.get("input_tokens"))
             total_tokens = usage.get("total_tokens")
 
     # Try Cohere format: raw.meta.tokens or raw.meta.billed_units

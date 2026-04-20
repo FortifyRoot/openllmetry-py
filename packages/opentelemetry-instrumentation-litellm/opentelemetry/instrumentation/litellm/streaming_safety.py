@@ -17,14 +17,21 @@ from opentelemetry.semconv_ai import SpanAttributes
 def is_sync_streaming_response(kwargs, response) -> bool:
     """Check if this is a streaming response."""
     if kwargs.get("stream"):
-        return not inspect.iscoroutine(response) and not inspect.isasyncgen(response)
+        return (
+            not inspect.iscoroutine(response)
+            and not inspect.isasyncgen(response)
+        )
     return False
 
 
 def is_async_streaming_response(kwargs, response) -> bool:
     """Check if this is an async streaming response."""
     if kwargs.get("stream"):
-        return inspect.iscoroutine(response) or inspect.isasyncgen(response)
+        return (
+            inspect.iscoroutine(response)
+            or inspect.isasyncgen(response)
+            or hasattr(response, "__aiter__")
+        )
     return False
 
 

@@ -70,6 +70,77 @@ from opentelemetry.trace import Span, Tracer, set_span_in_context
 # we use the regular OpenLLMetry instrumentations
 AVAILABLE_OPENLLMETRY_INSTRUMENTATIONS = ["OpenAI"]
 
+# FR: marker role set on the LlamaIndex "*.workflow" span when it
+# delegates full LLM attribute extraction to a child provider span.
+# The FR backend LLM-usage extractor skips spans carrying this role so
+# we don't double-count the wrapper + the child provider span. Safety
+# findings are still emitted on the wrapper (that's where safety fires
+# before the child provider span exists), which is why we ALSO need
+# the model-attribution helpers below.
+_FR_LLM_WRAPPER_ROLE_KEY = "fortifyroot.span.role"
+_FR_LLM_WRAPPER_ROLE_VALUE = "llm_wrapper"
+
+
+def _infer_provider_from_model(model) -> Optional[str]:
+    name = str(model or "").lower()
+    if "claude" in name or "anthropic" in name:
+        return "anthropic"
+    if "gpt" in name or name.startswith(("o1", "o3", "o4")):
+        return "openai"
+    return None
+
+
+def _stamp_llm_model_for_safety(event: BaseEvent, span) -> None:
+    """Set gen_ai.request.model / gen_ai.system on a delegated wrapper
+    span so that safety findings emitted on it have model attribution.
+
+    Leaves other attributes (prompts, params, usage) alone — those
+    belong to the child provider span. The FR backend LLM-usage
+    extractor skips wrapper spans by the ``fortifyroot.span.role``
+    marker, so adding gen_ai.request.model here does NOT cause
+    double-counting.
+    """
+    from opentelemetry.semconv._incubating.attributes import (
+        gen_ai_attributes as GenAIAttributes,
+    )
+    try:
+        model_dict = event.model_dict or {}
+    except Exception:  # pragma: no cover — defensive; event shape may vary
+        return
+    if "llm" in model_dict:
+        model_dict = model_dict.get("llm", {})
+    model = model_dict.get("model") if isinstance(model_dict, dict) else None
+    if model:
+        span.set_attribute(GenAIAttributes.GEN_AI_REQUEST_MODEL, model)
+        provider = _infer_provider_from_model(model)
+        if provider:
+            span.set_attribute(GenAIAttributes.GEN_AI_SYSTEM, provider)
+
+
+def _stamp_llm_response_model_for_safety(event: BaseEvent, span) -> None:
+    """Set gen_ai.response.model on a delegated wrapper span when the
+    LLM response carries a model different from the request (e.g.
+    Anthropic aliasing ``claude-4-sonnet`` → ``claude-sonnet-4``).
+
+    Used for completion-location safety findings that are emitted on
+    the wrapper span after the response has arrived.
+    """
+    from opentelemetry.semconv._incubating.attributes import (
+        gen_ai_attributes as GenAIAttributes,
+    )
+    response = getattr(event, "response", None)
+    raw = getattr(response, "raw", None) if response is not None else None
+    model = None
+    try:
+        if raw is not None:
+            model = getattr(raw, "model", None)
+            if not model and isinstance(raw, dict):
+                model = raw.get("model")
+    except Exception:  # pragma: no cover
+        model = None
+    if model:
+        span.set_attribute(GenAIAttributes.GEN_AI_RESPONSE_MODEL, model)
+
 CLASS_ANDMETHOD_NAME_FROM_ID_REGEX = re.compile(r"([a-zA-Z]+)\.([a-zA-Z_]+)-")
 STREAMING_END_EVENTS = (
     LLMChatEndEvent,
@@ -139,6 +210,17 @@ class SpanHolder:
                 emit_chat_message_events(event)
             else:
                 set_llm_chat_request(event, self.otel_span)
+        else:
+            # FR: even when the provider instrumentor owns the full LLM
+            # attribute set on its own child span, we still stamp
+            # ``gen_ai.request.model`` + ``gen_ai.system`` on this wrapper
+            # span so that safety violation events emitted here (via
+            # ``emit_deferred_findings``) carry model attribution. The
+            # wrapper span is marked ``fortifyroot.span.role="llm_wrapper"``
+            # at creation time so the backend LLM-usage extractor skips
+            # it for event counting and avoids double-counting with the
+            # child provider span.
+            _stamp_llm_model_for_safety(event, self.otel_span)
 
     @update_span_for_event.register
     def _(self, event: LLMChatEndEvent):
@@ -153,11 +235,20 @@ class SpanHolder:
                 emit_chat_response_events(event)
             else:
                 set_llm_chat_response(event, self.otel_span)  # noqa: F821
+        else:
+            # FR: completion-location safety findings (non-streaming) are
+            # emitted here for delegated providers too, so we need model
+            # attribution on the wrapper span for those events.
+            if not self.waiting_for_streaming:
+                apply_chat_end_safety(event, self.otel_span)
+            _stamp_llm_response_model_for_safety(event, self.otel_span)
 
     @update_span_for_event.register
     def _(self, event: LLMCompletionStartEvent):
         if not self.delegates_to_provider:
             apply_completion_start_span_attributes(event, self.otel_span)
+        else:
+            _stamp_llm_model_for_safety(event, self.otel_span)
 
     @update_span_for_event.register
     def _(self, event: LLMCompletionEndEvent):
@@ -165,6 +256,13 @@ class SpanHolder:
             # FR: same as LLMChatEndEvent -- skip when streaming safety is active.
             if not self.waiting_for_streaming:
                 apply_completion_end_safety(event, self.otel_span)
+        else:
+            # FR: delegated-provider completion safety still emits
+            # findings on the wrapper span; stamp response model on the
+            # wrapper so those findings carry model attribution.
+            if not self.waiting_for_streaming:
+                apply_completion_end_safety(event, self.otel_span)
+            _stamp_llm_response_model_for_safety(event, self.otel_span)
 
     @update_span_for_event.register
     def _(self, event: LLMPredictEndEvent):
@@ -261,6 +359,14 @@ class OpenLLMetrySpanHandler(BaseSpanHandler[SpanHolder]):
 
         span.set_attribute(SpanAttributes.TRACELOOP_SPAN_KIND, kind)
         span.set_attribute(SpanAttributes.TRACELOOP_ENTITY_NAME, span_name)
+        # FR: mark delegated LlamaIndex wrapper spans so the backend
+        # LLM-usage extractor skips them for event counting. Pair with
+        # ``_stamp_llm_model_for_safety()`` to keep safety findings
+        # emitted on this span (via emit_deferred_findings) correctly
+        # attributed to model / provider. See
+        # fr-system-tests st_phase_6.txt addendum 8.
+        if is_openllmetry_class:
+            span.set_attribute(_FR_LLM_WRAPPER_ROLE_KEY, _FR_LLM_WRAPPER_ROLE_VALUE)
         try:
             if should_send_prompts():
                 span.set_attribute(

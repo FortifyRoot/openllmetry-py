@@ -15,9 +15,11 @@ from opentelemetry.instrumentation.openai.shared.embeddings_wrappers import (
     aembeddings_wrapper,
     embeddings_wrapper,
 )
-from opentelemetry.instrumentation.openai.utils import is_metrics_enabled
+from opentelemetry.instrumentation.openai.utils import (
+    is_metrics_enabled,
+    unwrap_dotted_method,
+)
 from opentelemetry.instrumentation.openai.version import __version__
-from opentelemetry.instrumentation.utils import unwrap
 from opentelemetry.metrics import get_meter
 from opentelemetry.semconv._incubating.metrics import gen_ai_metrics as GenAIMetrics
 from opentelemetry.semconv_ai import Meters
@@ -168,9 +170,9 @@ class OpenAIV0Instrumentor(BaseInstrumentor):
         )
 
     def _uninstrument(self, **kwargs):
-        unwrap("openai", "Completion.create")
-        unwrap("openai", "Completion.acreate")
-        unwrap("openai", "ChatCompletion.create")
-        unwrap("openai", "ChatCompletion.acreate")
-        unwrap("openai", "Embedding.create")
-        unwrap("openai", "Embedding.acreate")
+        unwrap_dotted_method("openai", "Completion.create")
+        unwrap_dotted_method("openai", "Completion.acreate")
+        unwrap_dotted_method("openai", "ChatCompletion.create")
+        unwrap_dotted_method("openai", "ChatCompletion.acreate")
+        unwrap_dotted_method("openai", "Embedding.create")
+        unwrap_dotted_method("openai", "Embedding.acreate")

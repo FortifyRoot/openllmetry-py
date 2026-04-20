@@ -9,7 +9,7 @@ from opentelemetry.instrumentation.openai.v1.assistant_async_wrappers import (
     aruns_retrieve_wrapper,
 )
 from opentelemetry.instrumentation.openai.v1.assistant_wrappers import messages_create_wrapper
-from opentelemetry.instrumentation.utils import unwrap
+from opentelemetry.instrumentation.openai.utils import unwrap_dotted_method
 
 
 def instrument_additional_beta_safety_surfaces(instrumentor, tracer):
@@ -51,10 +51,10 @@ def instrument_additional_beta_safety_surfaces(instrumentor, tracer):
 
 
 def uninstrument_additional_beta_safety_surfaces():
-    unwrap("openai.resources.beta.assistants", "AsyncAssistants.create")
-    unwrap("openai.resources.beta.threads.runs", "AsyncRuns.create")
-    unwrap("openai.resources.beta.threads.runs", "AsyncRuns.retrieve")
-    unwrap("openai.resources.beta.threads.runs", "AsyncRuns.create_and_stream")
-    unwrap("openai.resources.beta.threads.messages", "Messages.create")
-    unwrap("openai.resources.beta.threads.messages", "AsyncMessages.create")
-    unwrap("openai.resources.beta.threads.messages", "AsyncMessages.list")
+    unwrap_dotted_method("openai.resources.beta.assistants", "AsyncAssistants.create")
+    unwrap_dotted_method("openai.resources.beta.threads.runs", "AsyncRuns.create")
+    unwrap_dotted_method("openai.resources.beta.threads.runs", "AsyncRuns.retrieve")
+    unwrap_dotted_method("openai.resources.beta.threads.runs", "AsyncRuns.create_and_stream")
+    unwrap_dotted_method("openai.resources.beta.threads.messages", "Messages.create")
+    unwrap_dotted_method("openai.resources.beta.threads.messages", "AsyncMessages.create")
+    unwrap_dotted_method("openai.resources.beta.threads.messages", "AsyncMessages.list")

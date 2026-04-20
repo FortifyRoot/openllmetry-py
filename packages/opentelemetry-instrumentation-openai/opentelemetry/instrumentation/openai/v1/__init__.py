@@ -18,7 +18,10 @@ from opentelemetry.instrumentation.openai.shared.embeddings_wrappers import (
 from opentelemetry.instrumentation.openai.shared.image_gen_wrappers import (
     image_gen_metrics_wrapper,
 )
-from opentelemetry.instrumentation.openai.utils import is_metrics_enabled
+from opentelemetry.instrumentation.openai.utils import (
+    is_metrics_enabled,
+    unwrap_dotted_method,
+)
 from opentelemetry.instrumentation.openai.v1.assistant_wrappers import (
     assistants_create_wrapper,
     messages_list_wrapper,
@@ -41,7 +44,6 @@ from opentelemetry.instrumentation.openai.v1.realtime_wrappers import (
 )
 
 from opentelemetry.instrumentation.openai.version import __version__
-from opentelemetry.instrumentation.utils import unwrap
 from opentelemetry.metrics import get_meter
 from opentelemetry.semconv._incubating.metrics import gen_ai_metrics as GenAIMetrics
 from opentelemetry.semconv_ai import Meters
@@ -349,31 +351,31 @@ class OpenAIV1Instrumentor(BaseInstrumentor):
         )
 
     def _uninstrument(self, **kwargs):
-        unwrap("openai.resources.chat.completions", "Completions.create")
-        unwrap("openai.resources.completions", "Completions.create")
-        unwrap("openai.resources.embeddings", "Embeddings.create")
-        unwrap("openai.resources.chat.completions", "AsyncCompletions.create")
-        unwrap("openai.resources.completions", "AsyncCompletions.create")
-        unwrap("openai.resources.embeddings", "AsyncEmbeddings.create")
-        unwrap("openai.resources.images", "Images.generate")
+        unwrap_dotted_method("openai.resources.chat.completions", "Completions.create")
+        unwrap_dotted_method("openai.resources.completions", "Completions.create")
+        unwrap_dotted_method("openai.resources.embeddings", "Embeddings.create")
+        unwrap_dotted_method("openai.resources.chat.completions", "AsyncCompletions.create")
+        unwrap_dotted_method("openai.resources.completions", "AsyncCompletions.create")
+        unwrap_dotted_method("openai.resources.embeddings", "AsyncEmbeddings.create")
+        unwrap_dotted_method("openai.resources.images", "Images.generate")
 
         # Beta APIs may not be available consistently in all versions
         try:
-            unwrap("openai.resources.beta.assistants", "Assistants.create")
+            unwrap_dotted_method("openai.resources.beta.assistants", "Assistants.create")
             uninstrument_additional_beta_safety_surfaces()
-            unwrap("openai.resources.beta.chat.completions", "Completions.parse")
-            unwrap("openai.resources.beta.chat.completions", "AsyncCompletions.parse")
-            unwrap("openai.resources.beta.threads.runs", "Runs.create")
-            unwrap("openai.resources.beta.threads.runs", "Runs.retrieve")
-            unwrap("openai.resources.beta.threads.runs", "Runs.create_and_stream")
-            unwrap("openai.resources.beta.threads.messages", "Messages.list")
-            unwrap("openai.resources.responses", "Responses.create")
-            unwrap("openai.resources.responses", "Responses.retrieve")
-            unwrap("openai.resources.responses", "Responses.cancel")
-            unwrap("openai.resources.responses", "AsyncResponses.create")
-            unwrap("openai.resources.responses", "AsyncResponses.retrieve")
-            unwrap("openai.resources.responses", "AsyncResponses.cancel")
-            unwrap("openai.resources.beta.realtime.realtime", "Realtime.connect")
-            unwrap("openai.resources.beta.realtime.realtime", "AsyncRealtime.connect")
+            unwrap_dotted_method("openai.resources.beta.chat.completions", "Completions.parse")
+            unwrap_dotted_method("openai.resources.beta.chat.completions", "AsyncCompletions.parse")
+            unwrap_dotted_method("openai.resources.beta.threads.runs", "Runs.create")
+            unwrap_dotted_method("openai.resources.beta.threads.runs", "Runs.retrieve")
+            unwrap_dotted_method("openai.resources.beta.threads.runs", "Runs.create_and_stream")
+            unwrap_dotted_method("openai.resources.beta.threads.messages", "Messages.list")
+            unwrap_dotted_method("openai.resources.responses", "Responses.create")
+            unwrap_dotted_method("openai.resources.responses", "Responses.retrieve")
+            unwrap_dotted_method("openai.resources.responses", "Responses.cancel")
+            unwrap_dotted_method("openai.resources.responses", "AsyncResponses.create")
+            unwrap_dotted_method("openai.resources.responses", "AsyncResponses.retrieve")
+            unwrap_dotted_method("openai.resources.responses", "AsyncResponses.cancel")
+            unwrap_dotted_method("openai.resources.beta.realtime.realtime", "Realtime.connect")
+            unwrap_dotted_method("openai.resources.beta.realtime.realtime", "AsyncRealtime.connect")
         except ImportError:
             pass

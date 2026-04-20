@@ -3,6 +3,7 @@
 import asyncio  # FR: async safety
 import inspect
 import logging
+import threading
 from typing import Collection
 
 from opentelemetry import context as context_api
@@ -43,6 +44,107 @@ _FR_SAFETY_SPAN_NAME = "fortifyroot.litellm.safety"
 _FR_SPAN_ROLE_KEY = "fortifyroot.span.role"
 _FR_SPAN_ROLE_VALUE = "safety_wrapper"
 
+# Marker set on the safety_wrapper span when LiteLLM's native OTel callback
+# will emit a separate ``litellm_request`` span. The FR backend's
+# LLMUsageExtractor uses this marker to skip the safety_wrapper for dedup
+# WITHOUT needing to see the child span in the same OTLP batch — important
+# because ``disable_batch=True`` (SimpleSpanProcessor) sends each span in its
+# own ResourceSpans and the existing parent→child correlation in
+# ``buildSafetyWrapperDedupeSet`` cannot observe siblings across batches.
+_FR_HAS_NATIVE_OTEL_CHILD_KEY = "fortifyroot.span.has_native_otel_child"
+_FR_COMPLETION_SAFETY_MARKER = "_fortifyroot_completion_safety_applied"
+_FR_COMPLETION_SAFETY_FALLBACK_MARKERS: set[tuple[int, type]] = set()
+_FR_COMPLETION_SAFETY_MARKERS_LOCK = threading.Lock()
+_FR_COMPLETION_SAFETY_MARKERS_MAX = 4096
+
+
+def _native_otel_callback_active() -> bool:
+    """Return True iff LiteLLM's native ``OpenTelemetry`` callback will
+    emit a separate ``litellm_request`` span.
+
+    LiteLLM's callback does not create that primary span when an ambient
+    parent span already exists unless ``USE_OTEL_LITELLM_REQUEST_SPAN`` is
+    enabled. FR always attaches its safety span as the ambient parent, so a
+    registered callback alone is not enough to mark the safety span for
+    backend dedup.
+    """
+    try:
+        import litellm
+        # LiteLLM's OpenTelemetry callback class lives at a known path.
+        from litellm.integrations.opentelemetry import OpenTelemetry as _LiteLLMNativeOTel  # noqa: N814
+        from litellm.secret_managers.main import get_secret_bool
+    except ImportError:
+        return False
+    callbacks = getattr(litellm, "callbacks", None) or []
+    try:
+        has_native_callback = any(
+            isinstance(cb, _LiteLLMNativeOTel) for cb in callbacks
+        )
+        if not has_native_callback:
+            return False
+        return bool(get_secret_bool("USE_OTEL_LITELLM_REQUEST_SPAN", False))
+    except Exception:
+        return False
+
+
+def _completion_safety_already_applied(response) -> bool:
+    try:
+        if bool(getattr(response, _FR_COMPLETION_SAFETY_MARKER, False)):
+            return True
+    except Exception:
+        pass
+
+    key = (id(response), type(response))
+    with _FR_COMPLETION_SAFETY_MARKERS_LOCK:
+        return key in _FR_COMPLETION_SAFETY_FALLBACK_MARKERS
+
+
+def _mark_completion_safety_applied(response) -> None:
+    try:
+        setattr(response, _FR_COMPLETION_SAFETY_MARKER, True)
+        return
+    except Exception:
+        pass
+
+    key = (id(response), type(response))
+    with _FR_COMPLETION_SAFETY_MARKERS_LOCK:
+        if len(_FR_COMPLETION_SAFETY_FALLBACK_MARKERS) >= _FR_COMPLETION_SAFETY_MARKERS_MAX:
+            _FR_COMPLETION_SAFETY_FALLBACK_MARKERS.clear()
+        _FR_COMPLETION_SAFETY_FALLBACK_MARKERS.add(key)
+
+
+def _ensure_completion_safety_applied(span, response, request_type, span_name) -> None:
+    """Apply completion safety once for a concrete LiteLLM response object.
+
+    LiteLLM async callbacks run through a global worker and may execute after
+    the wrapper has returned, after the event loop has changed, or during
+    process teardown. Running completion safety during FR span finalization
+    makes the customer-visible response deterministic. The callback path still
+    calls this helper first when it wins the race, preserving the
+    "FR logger before native OTel" ordering while preventing duplicate finding
+    events and ended-span writes when the worker runs late.
+    """
+    if response is None or _completion_safety_already_applied(response):
+        return
+    try:
+        apply_completion_safety(span, response, request_type, span_name)
+    finally:
+        _mark_completion_safety_applied(response)
+
+
+async def _ensure_completion_safety_applied_async(
+    span, response, request_type, span_name
+) -> None:
+    if response is None or _completion_safety_already_applied(response):
+        return
+    try:
+        await asyncio.to_thread(
+            apply_completion_safety, span, response, request_type, span_name
+        )
+    finally:
+        _mark_completion_safety_applied(response)
+
+
 _WRAPPED_METHODS = [
     ("litellm", "completion", False, False),
     ("litellm", "acompletion", True, False),
@@ -75,7 +177,9 @@ class _FortifyRootCompletionLogger:
         request_type = _request_type(kwargs, is_tc)
         span = trace.get_current_span()
         try:
-            apply_completion_safety(span, response_obj, request_type, span_name)
+            _ensure_completion_safety_applied(
+                span, response_obj, request_type, span_name
+            )
         except Exception:
             pass
 
@@ -87,8 +191,8 @@ class _FortifyRootCompletionLogger:
         request_type = _request_type(kwargs, is_tc)
         span = trace.get_current_span()
         try:
-            await asyncio.to_thread(
-                apply_completion_safety, span, response_obj, request_type, span_name
+            await _ensure_completion_safety_applied_async(
+                span, response_obj, request_type, span_name
             )
         except Exception:
             pass
@@ -180,15 +284,22 @@ def _invoke_completion(tracer, wrapped, args, kwargs, *, is_text_completion=Fals
     span_name = _span_name(kwargs, is_text_completion)
     request_type = _request_type(kwargs, is_text_completion)
 
+    span_attrs = {
+        GenAIAttributes.GEN_AI_SYSTEM: "litellm",
+        SpanAttributes.LLM_REQUEST_TYPE: request_type,
+        SpanAttributes.LLM_IS_STREAMING: bool(kwargs.get("stream")),
+        _FR_SPAN_ROLE_KEY: _FR_SPAN_ROLE_VALUE,
+    }
+    if _native_otel_callback_active():
+        # Hint to the FR backend that this safety_wrapper WILL have a
+        # sibling litellm_request child emitted by LiteLLM's native OTel
+        # callback — enables single-pass dedup in proc_llm_extractor.go
+        # without needing to see the child in the same OTLP batch.
+        span_attrs[_FR_HAS_NATIVE_OTEL_CHILD_KEY] = True
     span = tracer.start_span(
         _FR_SAFETY_SPAN_NAME,
         kind=SpanKind.CLIENT,
-        attributes={
-            GenAIAttributes.GEN_AI_SYSTEM: "litellm",
-            SpanAttributes.LLM_REQUEST_TYPE: request_type,
-            SpanAttributes.LLM_IS_STREAMING: bool(kwargs.get("stream")),
-            _FR_SPAN_ROLE_KEY: _FR_SPAN_ROLE_VALUE,
-        },
+        attributes=span_attrs,
     )
     # Attach FR span as ambient OTel context so LiteLLM's native OTel callback
     # creates its litellm_request span as a child of this span.
@@ -245,15 +356,18 @@ async def _invoke_acompletion(
     span_name = _span_name(kwargs, is_text_completion)
     request_type = _request_type(kwargs, is_text_completion)
 
+    span_attrs = {
+        GenAIAttributes.GEN_AI_SYSTEM: "litellm",
+        SpanAttributes.LLM_REQUEST_TYPE: request_type,
+        SpanAttributes.LLM_IS_STREAMING: bool(kwargs.get("stream")),
+        _FR_SPAN_ROLE_KEY: _FR_SPAN_ROLE_VALUE,
+    }
+    if _native_otel_callback_active():
+        span_attrs[_FR_HAS_NATIVE_OTEL_CHILD_KEY] = True
     span = tracer.start_span(
         _FR_SAFETY_SPAN_NAME,
         kind=SpanKind.CLIENT,
-        attributes={
-            GenAIAttributes.GEN_AI_SYSTEM: "litellm",
-            SpanAttributes.LLM_REQUEST_TYPE: request_type,
-            SpanAttributes.LLM_IS_STREAMING: bool(kwargs.get("stream")),
-            _FR_SPAN_ROLE_KEY: _FR_SPAN_ROLE_VALUE,
-        },
+        attributes=span_attrs,
     )
     ctx = set_span_in_context(span)
     ctx = context_api.set_value(SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY, True, ctx)
@@ -433,8 +547,9 @@ async def _finalize_awaitable_response(
 
 
 async def _async_finalize_response(span, response, request_type, span_name):  # FR: async safety
-    """Async variant of _finalize_response. Completion safety handled by logger."""  # FR: async safety
+    """Async variant of _finalize_response with deterministic completion safety."""  # FR: async safety
     try:  # FR: async safety
+        _ensure_completion_safety_applied(span, response, request_type, span_name)  # FR: async safety
         _set_response_attributes(span, response)  # FR: async safety
         span.set_status(Status(StatusCode.OK))  # FR: async safety
         return response  # FR: async safety
@@ -443,8 +558,9 @@ async def _async_finalize_response(span, response, request_type, span_name):  # 
 
 
 def _finalize_response(span, response, request_type, span_name):
-    """Finalize a non-streaming response. Completion safety handled by logger."""
+    """Finalize a non-streaming response with deterministic completion safety."""
     try:
+        _ensure_completion_safety_applied(span, response, request_type, span_name)
         _set_response_attributes(span, response)
         span.set_status(Status(StatusCode.OK))
         return response
