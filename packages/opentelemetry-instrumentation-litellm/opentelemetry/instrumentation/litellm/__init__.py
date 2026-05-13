@@ -4,11 +4,16 @@ import asyncio  # FR: async safety
 import inspect
 import logging
 import threading
-from typing import Collection
+import time
+from typing import Collection, Optional
 
 from opentelemetry import context as context_api
 from opentelemetry import trace
-from opentelemetry.instrumentation.fortifyroot import get_object_value
+from opentelemetry.instrumentation.fortifyroot import (
+    get_object_value,
+    register_framework_attempt,
+    unregister_framework_attempt,
+)
 from opentelemetry.instrumentation.instrumentor import BaseInstrumentor
 from opentelemetry.instrumentation.litellm.safety import (
     apply_completion_safety,
@@ -52,6 +57,16 @@ _FR_SPAN_ROLE_VALUE = "safety_wrapper"
 # own ResourceSpans and the existing parent→child correlation in
 # ``buildSafetyWrapperDedupeSet`` cannot observe siblings across batches.
 _FR_HAS_NATIVE_OTEL_CHILD_KEY = "fortifyroot.span.has_native_otel_child"
+
+# ST-10 §4.5: marker on parent set AFTER the first qualifying retry_attempt
+# child has started, so the FR backend's LLMUsageExtractor can dedup the
+# parent + non-retry siblings cross-batch (mirrors has_native_otel_child).
+_FR_HAS_RETRY_ATTEMPT_CHILD_KEY = "fortifyroot.span.has_retry_attempt_child"
+
+# ST-10 §4.4: per-attempt sibling span emitted by _FortifyRootRetryEmitter
+# under the safety_wrapper parent.
+_FR_RETRY_ATTEMPT_SPAN_NAME = "fortifyroot.litellm.retry_attempt"
+_FR_SPAN_ROLE_RETRY_ATTEMPT = "retry_attempt"
 _FR_COMPLETION_SAFETY_MARKER = "_fortifyroot_completion_safety_applied"
 _FR_COMPLETION_SAFETY_FALLBACK_MARKERS: set[tuple[int, type]] = set()
 _FR_COMPLETION_SAFETY_MARKERS_LOCK = threading.Lock()
@@ -157,6 +172,461 @@ _WRAPPED_METHODS = [
 ]
 
 
+# Lazy-import LiteLLM's CustomLogger base for inheritance. We MUST inherit
+# (not duck-type) because LiteLLM's dispatch loop gates every callback hook
+# on ``isinstance(callback, CustomLogger)`` — see
+# litellm_logging.py:1015 (log_pre_api_call), :1216, :1267, :2303
+# (log_success_event), :2613 (async_log_success_event), etc. A duck-typed
+# class is silently SKIPPED by the dispatch, so the retry emitter never
+# fires and no retry_attempt spans get emitted.
+#
+# The fallback to ``object`` keeps the module importable even when litellm
+# isn't installed (the instrumentor's ``instrumentation_dependencies`` check
+# guards actual use).
+#
+# Discovered end-to-end during ST-10 review-batch-1 re-verification 2026-05-10
+# after local vendoring. The pre-existing _FortifyRootCompletionLogger is
+# also duck-typed (same latent bug) but its primary safety-masking path is
+# synchronous inside _finalize_response, so its callback never firing is
+# masked in production. The retry emitter has no such backup — purely
+# callback-driven — which made this bug observable.
+try:
+    from litellm.integrations.custom_logger import CustomLogger as _LiteLLMCustomLoggerBase
+except ImportError:
+    _LiteLLMCustomLoggerBase = object  # type: ignore[assignment,misc]
+
+
+# ----------------------------------------------------------------------
+# ST-10 §4.4 / §4.3: retry-attempt sibling-span emission via a second
+# LiteLLM CustomLogger.
+# ----------------------------------------------------------------------
+#
+# The emitter opens one ``fortifyroot.litellm.retry_attempt`` sibling span
+# per attempt-start callback fired by LiteLLM, and ends it on the matching
+# success/failure callback. Per ST-10.0 C1 source-verified findings, this
+# fires per-attempt only on the ``completion_with_retries(num_retries=N)``
+# and ``Router(...)`` retry surfaces — see RETRY_LOOP.md §4.4.2 for the
+# documented coverage limitation on the ``completion(num_retries=N)``
+# path (where retries delegate to the underlying provider SDK and are
+# invisible to LiteLLM's callback layer).
+
+# Per-attempt correlation map (§4.3). Key = LiteLLM's per-call
+# ``litellm_call_id`` (sufficient because each attempt at the
+# observable surfaces gets a fresh ID — verified ST-10.0 C2 POC). Value =
+# {span, started_at_monotonic, parent_span, framework_token, ended}.
+# Bounded-size + TTL eviction defends against framework crashes that
+# leave attempts open.
+_FR_RETRY_ATTEMPT_MAP: dict[str, dict] = {}
+_FR_RETRY_ATTEMPT_MAP_LOCK = threading.Lock()
+_FR_RETRY_ATTEMPT_MAP_MAX = 4096
+_FR_RETRY_ATTEMPT_MAP_TTL_SEC = 60.0
+_FR_RETRY_ATTEMPT_EVICT_BATCH = 1024
+# Rate-limit eviction warnings to avoid log floods on pathological leaks.
+_FR_RETRY_ATTEMPT_EVICT_WARN_EVERY = 32
+_FR_RETRY_ATTEMPT_EVICT_WARN_COUNTER = 0
+
+
+def _evict_stale_retry_attempts_locked(now: float) -> int:
+    """Drop entries older than the TTL. Caller MUST hold the map lock.
+    Returns count evicted."""
+    cutoff = now - _FR_RETRY_ATTEMPT_MAP_TTL_SEC
+    stale = [k for k, v in _FR_RETRY_ATTEMPT_MAP.items() if v["started_at"] < cutoff]
+    for k in stale:
+        entry = _FR_RETRY_ATTEMPT_MAP.pop(k, None)
+        if entry is None:
+            continue
+        # Best-effort: end the leaked span and unregister its framework token.
+        try:
+            sp = entry.get("span")
+            if sp is not None and not entry.get("ended"):
+                sp.set_status(Status(StatusCode.ERROR, "retry_attempt orphaned (framework crashed)"))
+                sp.end()
+        except Exception:
+            pass
+        try:
+            unregister_framework_attempt(entry.get("framework_token"))
+        except Exception:
+            pass
+    return len(stale)
+
+
+def _enforce_retry_attempt_max_locked() -> int:
+    """Cap-evict the oldest _FR_RETRY_ATTEMPT_EVICT_BATCH entries when
+    the map exceeds _FR_RETRY_ATTEMPT_MAP_MAX. Caller MUST hold the
+    map lock. Returns count evicted."""
+    if len(_FR_RETRY_ATTEMPT_MAP) <= _FR_RETRY_ATTEMPT_MAP_MAX:
+        return 0
+    items = sorted(_FR_RETRY_ATTEMPT_MAP.items(), key=lambda kv: kv[1]["started_at"])
+    to_drop = items[:_FR_RETRY_ATTEMPT_EVICT_BATCH]
+    for k, entry in to_drop:
+        _FR_RETRY_ATTEMPT_MAP.pop(k, None)
+        try:
+            sp = entry.get("span")
+            if sp is not None and not entry.get("ended"):
+                sp.set_status(Status(StatusCode.ERROR, "retry_attempt cap-evicted"))
+                sp.end()
+        except Exception:
+            pass
+        try:
+            unregister_framework_attempt(entry.get("framework_token"))
+        except Exception:
+            pass
+    return len(to_drop)
+
+
+def _maybe_warn_retry_attempt_eviction(evicted: int) -> None:
+    global _FR_RETRY_ATTEMPT_EVICT_WARN_COUNTER
+    _FR_RETRY_ATTEMPT_EVICT_WARN_COUNTER += evicted
+    if _FR_RETRY_ATTEMPT_EVICT_WARN_COUNTER < _FR_RETRY_ATTEMPT_EVICT_WARN_EVERY:
+        return
+    _FR_RETRY_ATTEMPT_EVICT_WARN_COUNTER = 0
+    logger.warning(
+        "fortifyroot litellm retry_attempt map: evicted %d+ stale/over-cap entries; "
+        "framework may be leaking attempts (TTL=%.0fs, max=%d)",
+        evicted,
+        _FR_RETRY_ATTEMPT_MAP_TTL_SEC,
+        _FR_RETRY_ATTEMPT_MAP_MAX,
+    )
+
+
+def _resolve_routed_provider(kwargs) -> Optional[str]:
+    """Best-effort: derive the ROUTED provider (e.g. ``openai``) from
+    LiteLLM kwargs for the retry_attempt span's ``gen_ai.system``
+    attribute. Per RETRY_LOOP.md §4.2, this is the routed provider
+    (NOT the framework name). Falls back to ``litellm`` if undetermined.
+    """
+    candidate = (
+        kwargs.get("custom_llm_provider")
+        or kwargs.get("provider")
+        or (kwargs.get("model_response_object") and get_object_value(kwargs["model_response_object"], "model"))
+    )
+    raw: Optional[str] = None
+    if isinstance(candidate, str) and "/" in candidate:
+        # e.g. "openai/gpt-4o-mini" — take the prefix.
+        raw = candidate.split("/", 1)[0]
+    elif isinstance(candidate, str) and candidate:
+        raw = candidate
+    else:
+        model = kwargs.get("model")
+        if isinstance(model, str):
+            if "/" in model:
+                raw = model.split("/", 1)[0]
+            elif model and "." in model:
+                # No explicit provider AND no slash, but the model
+                # carries a Bedrock-style prefix like
+                # ``amazon.nova-lite-v1:0`` or
+                # ``anthropic.claude-3-5-sonnet`` — pass to the
+                # normaliser so it can recognise the prefix and
+                # map to "AWS". Bare model strings without "." or
+                # "/" (e.g. ``gpt-4o-mini``) carry no provider
+                # signal; we return None so the wrapper falls
+                # back to ``"litellm"`` rather than guessing.
+                raw = model
+    if raw is None:
+        return None
+    return _normalize_routed_provider(raw)
+
+
+# Normalisation for the ``gen_ai.system`` attribute.
+#
+# Per RETRY_LOOP.md §4.2, the value MUST be the ROUTED provider, NOT
+# the framework, AND it MUST be the canonical OTel-semconv form (e.g.
+# Bedrock = ``"AWS"``). LiteLLM's ``custom_llm_provider`` field uses
+# its own taxonomy (``"bedrock"``, ``"bedrock_converse"``,
+# ``"sagemaker"``, ...), so we map those to the §4.2 canonical
+# values and leave already-canonical values untouched. (Review-batch-1
+# Minor 4 fix 2026-05-10 — keeps cross-wrapper consistency with
+# LangChain's _resolve_routed_provider which already normalises
+# langchain_aws → ``"AWS"``.)
+_LITELLM_PROVIDER_NORMALISATION = {
+    # AWS Bedrock variants → "AWS"
+    "bedrock": "AWS",
+    "bedrock_converse": "AWS",
+    "amazon": "AWS",
+    "aws": "AWS",
+    # Google variants → "google" (gemini, vertex, ...)
+    "gemini": "google",
+    "vertex_ai": "google",
+    "vertex": "google",
+    "google_genai": "google",
+    "google_generativeai": "google",
+}
+
+
+def _normalize_routed_provider(raw: str) -> str:
+    """Map LiteLLM's provider taxonomy to RETRY_LOOP.md §4.2's
+    routed-provider form. If no mapping applies, return the raw
+    value lower-cased (matches OpenAI / Anthropic which already
+    use the canonical form).
+    """
+    lower = raw.lower()
+    if lower in _LITELLM_PROVIDER_NORMALISATION:
+        return _LITELLM_PROVIDER_NORMALISATION[lower]
+    # Bedrock model-prefix detection: LiteLLM model strings like
+    # "anthropic.claude-3-5-sonnet-20241022-v2:0" or "amazon.titan..."
+    # routed via Bedrock surface as ``custom_llm_provider="bedrock"``,
+    # but defensive pattern matching catches edge cases.
+    if lower.startswith(("amazon.", "anthropic.", "meta.", "ai21.", "cohere.", "mistral.")):
+        # These prefixes appear on Bedrock model IDs.
+        return "AWS"
+    return lower
+
+
+def _httpx_status_code(response_obj) -> Optional[int]:
+    """Best-effort extract HTTP status code from a LiteLLM exception or response."""
+    if response_obj is None:
+        return None
+    for attr in ("status_code", "http_status", "code"):
+        v = getattr(response_obj, attr, None)
+        if isinstance(v, int):
+            return v
+    response = getattr(response_obj, "response", None)
+    if response is not None:
+        return _httpx_status_code(response)
+    return None
+
+
+def _server_address(kwargs) -> Optional[str]:
+    api_base = kwargs.get("api_base")
+    if not isinstance(api_base, str) or not api_base:
+        return None
+    # api_base is typically like "https://api.openai.com/v1" — strip scheme/path.
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(api_base)
+        return parsed.hostname
+    except Exception:
+        return None
+
+
+def _start_retry_attempt_span(kwargs, *, is_text_completion: bool = False) -> None:
+    """Open a retry_attempt sibling span under the current ambient FR
+    parent span and register it in the correlation map. Idempotent:
+    if a span already exists for this litellm_call_id, replace it
+    (defensive — shouldn't happen on the per-attempt observable
+    surfaces, but tolerated to handle edge cases without losing the
+    parent-marker side effect)."""
+    call_id = kwargs.get("litellm_call_id") if isinstance(kwargs, dict) else None
+    if not call_id:
+        # No correlation key → cannot match success/failure later. Skip.
+        return
+
+    parent = trace.get_current_span()
+    if parent is None or not parent.get_span_context().is_valid:
+        # No ambient FR parent — likely the FR safety_wrapper context
+        # was never attached (e.g. user invoked LiteLLM's logger
+        # directly without going through the wrapped completion).
+        # Skip — parent-orphan retry_attempts have no meaningful place
+        # in the trace tree.
+        return
+
+    routed_provider = _resolve_routed_provider(kwargs) or "litellm"
+    model = kwargs.get("model")
+    operation = "text_completion" if (is_text_completion or kwargs.get("text_completion")) else "chat"
+    attrs = {
+        GenAIAttributes.GEN_AI_SYSTEM: routed_provider,
+        GenAIAttributes.GEN_AI_OPERATION_NAME: operation,
+        _FR_SPAN_ROLE_KEY: _FR_SPAN_ROLE_RETRY_ATTEMPT,
+    }
+    if model is not None:
+        attrs[GenAIAttributes.GEN_AI_REQUEST_MODEL] = str(model)
+    server = _server_address(kwargs)
+    if server:
+        # Per RETRY_LOOP.md §4.2, attribute name is the OTel-standard
+        # ``server.address`` (network namespace) — using the literal
+        # key string for forward-compat across semconv lib changes.
+        attrs["server.address"] = server
+
+    tracer = trace.get_tracer(__name__, __version__)
+    # Set the parent context explicitly so the retry_attempt span is a
+    # CHILD of the FR safety_wrapper, not a child of whatever happens
+    # to be ambient (which IS the safety_wrapper here, but explicit is
+    # safer for future refactoring).
+    parent_ctx = set_span_in_context(parent)
+    span = tracer.start_span(
+        _FR_RETRY_ATTEMPT_SPAN_NAME,
+        kind=SpanKind.CLIENT,
+        attributes=attrs,
+        context=parent_ctx,
+    )
+
+    # §4.7.1: register a framework-attempt token so direct-SDK
+    # wrappers (OpenAI/Anthropic/Bedrock) suppress their own emission
+    # while this attempt is in flight.
+    try:
+        framework_token = register_framework_attempt()
+    except Exception:
+        framework_token = None
+        logger.debug("Failed to register framework attempt token", exc_info=True)
+
+    now = time.monotonic()
+    with _FR_RETRY_ATTEMPT_MAP_LOCK:
+        # Defensive: TTL + cap eviction on every insert path.
+        evicted = _evict_stale_retry_attempts_locked(now)
+        evicted += _enforce_retry_attempt_max_locked()
+        if evicted:
+            _maybe_warn_retry_attempt_eviction(evicted)
+        _FR_RETRY_ATTEMPT_MAP[call_id] = {
+            "span": span,
+            "parent": parent,
+            "started_at": now,
+            "framework_token": framework_token,
+            "ended": False,
+        }
+
+    # §4.5 marker timing: set has_retry_attempt_child=true on the
+    # parent ONLY AFTER the first qualifying retry_attempt has
+    # successfully started. We just succeeded; mark the parent now.
+    # Idempotent: setting the attribute twice on the same parent is a
+    # no-op (OTel deduplicates).
+    try:
+        parent.set_attribute(_FR_HAS_RETRY_ATTEMPT_CHILD_KEY, True)
+    except Exception:
+        # Some span impls (e.g. a NonRecordingSpan during shutdown)
+        # may reject set_attribute. Non-fatal; the in-batch dedup
+        # path still fires from the in-batch retry_attempt children.
+        logger.debug("Failed to set has_retry_attempt_child on parent", exc_info=True)
+
+
+def _finalize_retry_attempt_span(
+    kwargs,
+    response_obj,
+    *,
+    success: bool,
+) -> None:
+    """End the retry_attempt span associated with this kwargs's
+    ``litellm_call_id``. Idempotent: a no-op if the entry is already
+    ended (handles the sync+async race where both
+    ``log_success_event`` and ``async_log_success_event`` may fire)."""
+    call_id = kwargs.get("litellm_call_id") if isinstance(kwargs, dict) else None
+    if not call_id:
+        return
+    with _FR_RETRY_ATTEMPT_MAP_LOCK:
+        entry = _FR_RETRY_ATTEMPT_MAP.get(call_id)
+        if entry is None or entry.get("ended"):
+            return
+        entry["ended"] = True
+        # Keep the entry around briefly — TTL sweep will clean it up,
+        # OR the success/failure callback's symmetric counterpart can
+        # short-circuit on the "ended" flag.
+        # Actually pop now: the "ended" sentinel is only useful within
+        # this critical section; outside it, popping is cleaner.
+        _FR_RETRY_ATTEMPT_MAP.pop(call_id, None)
+        span = entry["span"]
+        framework_token = entry.get("framework_token")
+
+    try:
+        if success:
+            response_model = get_object_value(response_obj, "model")
+            if response_model:
+                span.set_attribute(GenAIAttributes.GEN_AI_RESPONSE_MODEL, str(response_model))
+            response_id = get_object_value(response_obj, "id")
+            if response_id:
+                span.set_attribute(GenAIAttributes.GEN_AI_RESPONSE_ID, str(response_id))
+            usage = get_object_value(response_obj, "usage")
+            input_tokens = get_object_value(usage, "prompt_tokens")
+            output_tokens = get_object_value(usage, "completion_tokens")
+            # Per §4.2 token-usage rule: SET when known, OMIT when unknown.
+            if input_tokens is not None:
+                span.set_attribute(GenAIAttributes.GEN_AI_USAGE_INPUT_TOKENS, int(input_tokens))
+            if output_tokens is not None:
+                span.set_attribute(GenAIAttributes.GEN_AI_USAGE_OUTPUT_TOKENS, int(output_tokens))
+            span.set_status(Status(StatusCode.OK))
+        else:
+            exception = kwargs.get("exception") if isinstance(kwargs, dict) else None
+            status_code = _httpx_status_code(exception) or _httpx_status_code(response_obj)
+            if status_code is not None:
+                # Per RETRY_LOOP.md §4.2 the attribute name is the
+                # OTel-standard ``http.status_code`` (legacy semconv;
+                # backend extractor reads the literal key, not a
+                # python-binding constant).
+                span.set_attribute("http.status_code", int(status_code))
+            if exception is not None:
+                error_type = type(exception).__name__
+                span.set_attribute("error.type", error_type)
+                try:
+                    span.record_exception(exception)
+                except Exception:
+                    pass
+                span.set_status(Status(StatusCode.ERROR, str(exception)))
+            else:
+                span.set_status(Status(StatusCode.ERROR, "retry_attempt failed"))
+    finally:
+        try:
+            span.end()
+        except Exception:
+            logger.debug("Failed to end retry_attempt span", exc_info=True)
+        try:
+            unregister_framework_attempt(framework_token)
+        except Exception:
+            pass
+
+
+class _FortifyRootRetryEmitter(_LiteLLMCustomLoggerBase):
+    """Second LiteLLM CustomLogger. Emits per-HTTP-attempt sibling
+    spans (``fortifyroot.litellm.retry_attempt``) under the FR
+    safety_wrapper parent.
+
+    Registered AFTER ``_FortifyRootCompletionLogger`` in the LiteLLM
+    callbacks list so that completion-safety masking still runs
+    BEFORE retry_attempt finalization (the retry_attempt span captures
+    metadata only — model, tokens, status — not prompt/completion
+    content).
+
+    MUST inherit from ``litellm.integrations.custom_logger.CustomLogger``
+    because LiteLLM's dispatch loop gates every callback hook on
+    ``isinstance(callback, CustomLogger)``. A duck-typed class is
+    silently skipped — see _LiteLLMCustomLoggerBase docstring above.
+    """
+
+    def log_pre_api_call(self, model, messages, kwargs):
+        try:
+            _start_retry_attempt_span(kwargs)
+        except Exception:
+            logger.debug("retry-attempt span start failed", exc_info=True)
+
+    async def async_log_pre_api_call(self, model, messages, kwargs):
+        # Defensive: LiteLLM's dispatch can fire either log_pre_api_call
+        # OR async_log_pre_api_call depending on the call path (sync vs
+        # async, callback registration timing). The _start helper is
+        # idempotent on (litellm_call_id) — defensive replace path
+        # tolerates duplicate fires — so making BOTH hooks the entry
+        # point avoids missed attempts on async-only paths.
+        # Review-round-2 Blocker 4 (2026-05-11): we previously only
+        # implemented the sync hook; some LiteLLM call paths (acompletion
+        # via certain routers) skipped the sync pre-call hook and our
+        # retry_attempt span never opened, leaving the failure callback
+        # with no entry to finalise.
+        try:
+            _start_retry_attempt_span(kwargs)
+        except Exception:
+            logger.debug("retry-attempt span async start failed", exc_info=True)
+
+    def log_success_event(self, kwargs, response_obj, start_time, end_time):
+        try:
+            _finalize_retry_attempt_span(kwargs, response_obj, success=True)
+        except Exception:
+            logger.debug("retry-attempt span finalize-success failed", exc_info=True)
+
+    async def async_log_success_event(self, kwargs, response_obj, start_time, end_time):
+        try:
+            _finalize_retry_attempt_span(kwargs, response_obj, success=True)
+        except Exception:
+            logger.debug("retry-attempt span async finalize-success failed", exc_info=True)
+
+    def log_failure_event(self, kwargs, response_obj, start_time, end_time):
+        try:
+            _finalize_retry_attempt_span(kwargs, response_obj, success=False)
+        except Exception:
+            logger.debug("retry-attempt span finalize-failure failed", exc_info=True)
+
+    async def async_log_failure_event(self, kwargs, response_obj, start_time, end_time):
+        try:
+            _finalize_retry_attempt_span(kwargs, response_obj, success=False)
+        except Exception:
+            logger.debug("retry-attempt span async finalize-failure failed", exc_info=True)
+
+
 class _FortifyRootCompletionLogger:
     """LiteLLM duck-typed CustomLogger that masks completions before native OTel fires.
 
@@ -220,9 +690,19 @@ class LiteLLMInstrumentor(BaseInstrumentor):
                 litellm.callbacks = []
             self._fr_logger = _FortifyRootCompletionLogger()
             litellm.callbacks.insert(0, self._fr_logger)
+            # ST-10.1: register the retry-attempt emitter immediately
+            # AFTER the completion logger so completion-safety masking
+            # still runs first. The retry emitter captures metadata
+            # only (model, tokens, status), so its placement is not
+            # safety-critical. Insert at index 1 to keep ordering
+            # deterministic regardless of customer-registered
+            # callbacks.
+            self._fr_retry_emitter = _FortifyRootRetryEmitter()
+            litellm.callbacks.insert(1, self._fr_retry_emitter)
         except Exception:
-            logger.debug("Failed to register _FortifyRootCompletionLogger")
+            logger.debug("Failed to register FR LiteLLM callbacks")
             self._fr_logger = None
+            self._fr_retry_emitter = None
 
         for module_name, func_name, is_async, is_text_completion in _WRAPPED_METHODS:
             wrapper = (
@@ -233,7 +713,19 @@ class LiteLLMInstrumentor(BaseInstrumentor):
             wrap_function_wrapper(module_name, func_name, wrapper)
 
     def _uninstrument(self, **kwargs):
-        # Remove FR's logger from litellm.callbacks
+        # Remove FR's loggers from litellm.callbacks. Order: retry
+        # emitter first so it can no longer pin tokens, THEN the
+        # completion logger.
+        fr_retry_emitter = getattr(self, "_fr_retry_emitter", None)
+        if fr_retry_emitter is not None:
+            try:
+                import litellm
+                if isinstance(getattr(litellm, "callbacks", None), list):
+                    litellm.callbacks.remove(fr_retry_emitter)
+            except Exception:
+                pass
+            self._fr_retry_emitter = None
+
         fr_logger = getattr(self, "_fr_logger", None)
         if fr_logger is not None:
             try:
