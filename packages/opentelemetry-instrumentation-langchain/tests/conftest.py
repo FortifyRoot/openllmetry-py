@@ -26,10 +26,23 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 
 pytest_plugins = []
 
+_FR_SPAN_NAME_PREFIX = "fortifyroot."
+
+
+class _LegacyAssertionSpanExporter(InMemorySpanExporter):
+    def get_finished_spans(self):
+        spans = super().get_finished_spans()
+        return tuple(
+            span for span in spans if not span.name.startswith(_FR_SPAN_NAME_PREFIX)
+        )
+
 
 @pytest.fixture(scope="session", name="span_exporter")
 def fixture_span_exporter():
-    exporter = InMemorySpanExporter()
+    # The upstream/non-FR LangChain tests assert the historical Traceloop
+    # spans exactly. ST-10 adds FR implementation spans; keep these legacy
+    # assertions focused while dedicated ST-10 retry tests use a raw exporter.
+    exporter = _LegacyAssertionSpanExporter()
     yield exporter
 
 

@@ -24,6 +24,7 @@ from __future__ import annotations
 from uuid import uuid4
 
 import pytest
+from langchain_core.messages import HumanMessage
 from opentelemetry import trace
 from opentelemetry.instrumentation.fortifyroot import (
     is_framework_owned,
@@ -80,32 +81,28 @@ def reset_state():
 # Instrumentor symmetry.
 # ---------------------------------------------------------------------------
 
-def test_instrumentor_wires_retry_handler_globally():
+def test_instrumentor_wires_retry_handler_globally(instrument_legacy):
     """When LangchainInstrumentor instruments, every newly-created
     BaseCallbackManager has the _FortifyRootRetryHandler installed
     via the patched __init__."""
     from langchain_core.callbacks import BaseCallbackManager
 
-    instrumentor = LangchainInstrumentor()
-    try:
-        instrumentor.instrument()
-        # Create a manager; the patched __init__ should register both
-        # the existing TraceloopCallbackHandler AND our retry handler.
-        mgr = BaseCallbackManager(handlers=[])
-        retry_handlers = [
-            h for h in mgr.inheritable_handlers
-            if isinstance(h, _FortifyRootRetryHandler)
-        ]
-        assert len(retry_handlers) == 1, (
-            f"expected exactly 1 retry handler on the manager, "
-            f"got {len(retry_handlers)}; "
-            f"handlers={[type(h).__name__ for h in mgr.inheritable_handlers]}"
-        )
-    finally:
-        instrumentor.uninstrument()
+    del instrument_legacy  # only requested for its side effect
+    # Create a manager; the patched __init__ should register both
+    # the existing TraceloopCallbackHandler AND our retry handler.
+    mgr = BaseCallbackManager(handlers=[])
+    retry_handlers = [
+        h for h in mgr.inheritable_handlers
+        if isinstance(h, _FortifyRootRetryHandler)
+    ]
+    assert len(retry_handlers) == 1, (
+        f"expected exactly 1 retry handler on the manager, "
+        f"got {len(retry_handlers)}; "
+        f"handlers={[type(h).__name__ for h in mgr.inheritable_handlers]}"
+    )
 
 
-def test_traceloop_handler_registered_before_fr_retry_handler():
+def test_traceloop_handler_registered_before_fr_retry_handler(instrument_legacy):
     """REGRESSION GUARD (review-batch-1 v6 fix 2026-05-11):
     LangChain dispatches callbacks in registration order. The
     Traceloop handler MUST run BEFORE the FR retry handler, so
@@ -136,36 +133,32 @@ def test_traceloop_handler_registered_before_fr_retry_handler():
         TraceloopCallbackHandler,
     )
 
-    instrumentor = LangchainInstrumentor()
+    del instrument_legacy  # only requested for its side effect
+    mgr = BaseCallbackManager(handlers=[])
+    types = [type(h) for h in mgr.inheritable_handlers]
     try:
-        instrumentor.instrument()
-        mgr = BaseCallbackManager(handlers=[])
-        types = [type(h) for h in mgr.inheritable_handlers]
-        try:
-            retry_idx = next(
-                i for i, h in enumerate(mgr.inheritable_handlers)
-                if isinstance(h, _FortifyRootRetryHandler)
-            )
-        except StopIteration:
-            retry_idx = None
-        try:
-            traceloop_idx = next(
-                i for i, h in enumerate(mgr.inheritable_handlers)
-                if isinstance(h, TraceloopCallbackHandler)
-            )
-        except StopIteration:
-            traceloop_idx = None
-        assert retry_idx is not None, f"FR retry handler missing; saw {types}"
-        assert traceloop_idx is not None, f"Traceloop handler missing; saw {types}"
-        assert traceloop_idx < retry_idx, (
-            f"Traceloop handler must precede FR retry handler in "
-            f"inheritable_handlers — traceloop={traceloop_idx}, "
-            f"retry={retry_idx}, all={types}. Wrong order breaks "
-            f"Traceloop's context-attach discipline and leaks OTel "
-            f"context across pytest test boundaries."
+        retry_idx = next(
+            i for i, h in enumerate(mgr.inheritable_handlers)
+            if isinstance(h, _FortifyRootRetryHandler)
         )
-    finally:
-        instrumentor.uninstrument()
+    except StopIteration:
+        retry_idx = None
+    try:
+        traceloop_idx = next(
+            i for i, h in enumerate(mgr.inheritable_handlers)
+            if isinstance(h, TraceloopCallbackHandler)
+        )
+    except StopIteration:
+        traceloop_idx = None
+    assert retry_idx is not None, f"FR retry handler missing; saw {types}"
+    assert traceloop_idx is not None, f"Traceloop handler missing; saw {types}"
+    assert traceloop_idx < retry_idx, (
+        f"Traceloop handler must precede FR retry handler in "
+        f"inheritable_handlers — traceloop={traceloop_idx}, "
+        f"retry={retry_idx}, all={types}. Wrong order breaks "
+        f"Traceloop's context-attach discipline and leaks OTel "
+        f"context across pytest test boundaries."
+    )
 
 
 def test_no_leaked_ambient_context_after_simulated_workflow(instrument_legacy):
@@ -271,17 +264,14 @@ def test_uninstrument_invokes_unwrap_for_callback_manager():
     """
     from unittest.mock import patch
 
-    instrumentor = LangchainInstrumentor()
-    # Force-instrument first (idempotent if already instrumented).
-    try:
-        instrumentor.instrument()
-    except Exception:
-        pass
-
     with patch(
         "opentelemetry.instrumentation.langchain.unwrap"
-    ) as mock_unwrap:
-        instrumentor.uninstrument()
+    ) as mock_unwrap, patch(
+        "opentelemetry.instrumentation.langchain.uninstrument_safety_wrappers"
+    ):
+        instrumentor = object.__new__(LangchainInstrumentor)
+        instrumentor.disable_trace_context_propagation = True
+        LangchainInstrumentor._uninstrument(instrumentor)
         # First positional arg of unwrap is the module path.
         unwrap_targets = [
             (call.args[0], call.args[1])
@@ -310,7 +300,7 @@ def test_on_chat_model_start_emits_retry_attempt(fresh_tracer):
         parent_run_id = uuid4()
         handler.on_chat_model_start(
             serialized={"id": ["langchain_openai", "chat_models", "base", "ChatOpenAI"]},
-            messages=[],
+            messages=[[HumanMessage(content="hello masked [EMAIL]")]],
             run_id=run_id,
             parent_run_id=parent_run_id,
             invocation_params={"model": "gpt-4o-mini"},
@@ -331,6 +321,8 @@ def test_on_chat_model_start_emits_retry_attempt(fresh_tracer):
         "gen_ai.system must be the routed provider (openai), NOT 'langchain'"
     )
     assert rs.attributes.get("gen_ai.request.model") == "gpt-4o-mini"
+    assert rs.attributes.get("gen_ai.prompt.0.role") == "user"
+    assert rs.attributes.get("gen_ai.prompt.0.content") == "hello masked [EMAIL]"
 
 
 def test_on_llm_start_emits_retry_attempt(fresh_tracer):
@@ -359,6 +351,8 @@ def test_on_llm_start_emits_retry_attempt(fresh_tracer):
     assert len(retry_spans) == 1
     assert retry_spans[0].attributes.get("gen_ai.system") == "anthropic"
     assert retry_spans[0].attributes.get("gen_ai.request.model") == "claude-haiku-4-5"
+    assert retry_spans[0].attributes.get("gen_ai.prompt.0.role") == "user"
+    assert retry_spans[0].attributes.get("gen_ai.prompt.0.content") == "hi"
 
 
 # ---------------------------------------------------------------------------

@@ -5,6 +5,14 @@ from opentelemetry.semconv_ai import SpanAttributes
 from traceloop.sdk import Traceloop
 from traceloop.sdk.decorators import task, workflow
 
+_FR_LANGCHAIN_RETRY_ATTEMPT_SPAN_NAME = "fortifyroot.langchain.retry_attempt"
+
+
+def _without_fr_langchain_retry_attempt_spans(spans):
+    return [
+        span for span in spans if span.name != _FR_LANGCHAIN_RETRY_ATTEMPT_SPAN_NAME
+    ]
+
 
 def test_association_properties(exporter):
     @workflow(name="test_workflow")
@@ -87,7 +95,7 @@ def test_langchain_association_properties(exporter):
         {"metadata": {"user_id": "1234", "session_id": 456}},
     )
 
-    spans = exporter.get_finished_spans()
+    spans = _without_fr_langchain_retry_attempt_spans(exporter.get_finished_spans())
 
     assert [
         "ChatPromptTemplate.task",
@@ -158,7 +166,7 @@ def test_langchain_and_external_association_properties(exporter):
 
     test_workflow_external()
 
-    spans = exporter.get_finished_spans()
+    spans = _without_fr_langchain_retry_attempt_spans(exporter.get_finished_spans())
 
     assert [
         "ChatPromptTemplate.task",

@@ -309,8 +309,18 @@ def _resolve_routed_provider(kwargs) -> Optional[str]:
     else:
         model = kwargs.get("model")
         if isinstance(model, str):
+            model_lower = model.lower()
             if "/" in model:
                 raw = model.split("/", 1)[0]
+            elif model_lower.startswith("claude-"):
+                # LiteLLM callbacks can pass Anthropic-routed calls as
+                # bare Claude model ids (for example
+                # ``claude-4-sonnet-20250514``) even when the public
+                # call used ``anthropic/<model>``. Without this inference
+                # retry_attempt spans fall back to gen_ai.system="litellm",
+                # so the backend stores the canonical ST-10 event under the
+                # framework rather than the routed provider.
+                raw = "anthropic"
             elif model and "." in model:
                 # No explicit provider AND no slash, but the model
                 # carries a Bedrock-style prefix like
@@ -399,6 +409,39 @@ def _server_address(kwargs) -> Optional[str]:
         return None
 
 
+def _add_retry_attempt_prompt_attrs(
+    attrs: dict,
+    kwargs: dict,
+    *,
+    is_text_completion: bool = False,
+) -> None:
+    """Copy request prompt content onto the retry_attempt span.
+
+    Backend §4.5 makes retry_attempt the canonical LLMUsageEvent span
+    when it exists. Safety correlation and masking assertions therefore
+    need the same request content on the retry_attempt span that the
+    safety_wrapper parent carries.
+    """
+    operation_is_text = is_text_completion or kwargs.get("text_completion")
+    if operation_is_text:
+        prompt = kwargs.get("prompt")
+        for index, text in enumerate(extract_prompt_texts(prompt)):
+            attrs[f"{SpanAttributes.LLM_PROMPTS}.{index}.role"] = "user"
+            attrs[f"{SpanAttributes.LLM_PROMPTS}.{index}.content"] = text
+        return
+
+    messages = kwargs.get("messages")
+    if not isinstance(messages, list):
+        return
+    for index, message in enumerate(messages):
+        role = get_object_value(message, "role")
+        content = extract_text_content(get_object_value(message, "content"))
+        if role is not None:
+            attrs[f"{SpanAttributes.LLM_PROMPTS}.{index}.role"] = str(role)
+        if content:
+            attrs[f"{SpanAttributes.LLM_PROMPTS}.{index}.content"] = content
+
+
 def _start_retry_attempt_span(kwargs, *, is_text_completion: bool = False) -> None:
     """Open a retry_attempt sibling span under the current ambient FR
     parent span and register it in the correlation map. Idempotent:
@@ -436,6 +479,7 @@ def _start_retry_attempt_span(kwargs, *, is_text_completion: bool = False) -> No
         # ``server.address`` (network namespace) — using the literal
         # key string for forward-compat across semconv lib changes.
         attrs["server.address"] = server
+    _add_retry_attempt_prompt_attrs(attrs, kwargs, is_text_completion=is_text_completion)
 
     tracer = trace.get_tracer(__name__, __version__)
     # Set the parent context explicitly so the retry_attempt span is a
@@ -525,7 +569,11 @@ def _finalize_retry_attempt_span(
                 span.set_attribute(GenAIAttributes.GEN_AI_RESPONSE_ID, str(response_id))
             usage = get_object_value(response_obj, "usage")
             input_tokens = get_object_value(usage, "prompt_tokens")
+            if input_tokens is None:
+                input_tokens = get_object_value(usage, "input_tokens")
             output_tokens = get_object_value(usage, "completion_tokens")
+            if output_tokens is None:
+                output_tokens = get_object_value(usage, "output_tokens")
             # Per §4.2 token-usage rule: SET when known, OMIT when unknown.
             if input_tokens is not None:
                 span.set_attribute(GenAIAttributes.GEN_AI_USAGE_INPUT_TOKENS, int(input_tokens))
@@ -570,8 +618,7 @@ class _FortifyRootRetryEmitter(_LiteLLMCustomLoggerBase):
     Registered AFTER ``_FortifyRootCompletionLogger`` in the LiteLLM
     callbacks list so that completion-safety masking still runs
     BEFORE retry_attempt finalization (the retry_attempt span captures
-    metadata only — model, tokens, status — not prompt/completion
-    content).
+    request prompt content at start, then model/tokens/status at end).
 
     MUST inherit from ``litellm.integrations.custom_logger.CustomLogger``
     because LiteLLM's dispatch loop gates every callback hook on

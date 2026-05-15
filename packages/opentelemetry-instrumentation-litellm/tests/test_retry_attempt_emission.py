@@ -218,6 +218,7 @@ def test_single_attempt_emits_one_retry_attempt_under_parent(fresh_tracer):
             "model": "openai/gpt-4o-mini",
             "api_base": "https://api.openai.com/v1",
             "custom_llm_provider": "openai",
+            "messages": [{"role": "user", "content": "hello masked [EMAIL]"}],
         }
         _start_retry_attempt_span(kwargs)
 
@@ -254,11 +255,47 @@ def test_single_attempt_emits_one_retry_attempt_under_parent(fresh_tracer):
     assert retry_span.attributes.get("gen_ai.response.id") == "resp-abc"
     assert retry_span.attributes.get("gen_ai.usage.input_tokens") == 10
     assert retry_span.attributes.get("gen_ai.usage.output_tokens") == 5
+    assert retry_span.attributes.get("gen_ai.prompt.0.role") == "user"
+    assert retry_span.attributes.get("gen_ai.prompt.0.content") == "hello masked [EMAIL]"
 
     # §4.5 marker: must be set on parent.
     assert parent_span_exported.attributes.get(
         _FR_HAS_RETRY_ATTEMPT_CHILD_KEY
     ) is True, "parent MUST carry has_retry_attempt_child=true"
+
+
+def test_retry_attempt_accepts_anthropic_usage_token_names(fresh_tracer):
+    """Anthropic-shaped LiteLLM responses may expose input/output token
+    names instead of OpenAI-style prompt/completion names."""
+    tracer, exporter, _ = fresh_tracer
+
+    parent = tracer.start_span("fortifyroot.litellm.safety")
+    with trace.use_span(parent, end_on_exit=False):
+        kwargs: dict[str, Any] = {
+            "litellm_call_id": "anthropic-usage-001",
+            "model": "anthropic/claude-4-sonnet-20250514",
+            "custom_llm_provider": "anthropic",
+            "messages": [{"role": "user", "content": "hello"}],
+        }
+        _start_retry_attempt_span(kwargs)
+
+        class MockUsage:
+            input_tokens = 11
+            output_tokens = 7
+
+        class MockResponse:
+            model = "claude-sonnet-4-20250514"
+            usage = MockUsage()
+
+        _finalize_retry_attempt_span(kwargs, MockResponse(), success=True)
+    parent.end()
+
+    retry_span = next(
+        s for s in exporter.get_finished_spans()
+        if s.name == _FR_RETRY_ATTEMPT_SPAN_NAME
+    )
+    assert retry_span.attributes.get("gen_ai.usage.input_tokens") == 11
+    assert retry_span.attributes.get("gen_ai.usage.output_tokens") == 7
 
 
 # ---------------------------------------------------------------------------
@@ -500,6 +537,8 @@ def test_resolve_routed_provider_normalisation():
     # Already-canonical values pass through (lower-cased).
     assert _resolve_routed_provider({"custom_llm_provider": "openai"}) == "openai"
     assert _resolve_routed_provider({"custom_llm_provider": "anthropic"}) == "anthropic"
+    assert _resolve_routed_provider({"model": "claude-4-sonnet-20250514"}) == "anthropic"
+    assert _resolve_routed_provider({"model": "claude-sonnet-4-20250514"}) == "anthropic"
 
     # Empty / undeterminable → None.
     assert _resolve_routed_provider({}) is None

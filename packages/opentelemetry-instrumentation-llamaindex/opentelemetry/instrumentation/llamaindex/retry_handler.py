@@ -196,7 +196,51 @@ def _resolve_model(instance: Any) -> Optional[str]:
     return None
 
 
-def _start_retry_attempt(id_: str, instance: Any) -> None:
+def _content_to_string(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    try:
+        import json
+        return json.dumps(content, default=str)
+    except Exception:
+        return str(content)
+
+
+def _add_prompt_attrs(attrs: dict[str, Any], bound_args: Any) -> None:
+    """Copy request prompt content onto the retry_attempt span.
+
+    Backend §4.5 makes retry_attempt the canonical LLMUsageEvent span
+    when it exists, so safety correlation still needs prompt content on
+    this span. LlamaIndex safety wrappers have already processed the
+    bound arguments by the time dispatcher span handlers see them.
+    """
+    arguments = getattr(bound_args, "arguments", None)
+    if not isinstance(arguments, dict):
+        return
+
+    prompt = arguments.get("prompt")
+    if isinstance(prompt, str):
+        attrs["gen_ai.prompt.0.role"] = "user"
+        attrs["gen_ai.prompt.0.content"] = prompt
+        return
+
+    messages = arguments.get("messages")
+    if not isinstance(messages, list):
+        return
+    for i, msg in enumerate(messages):
+        role = getattr(msg, "role", None)
+        if role is None and isinstance(msg, dict):
+            role = msg.get("role")
+        content = getattr(msg, "content", None)
+        if content is None and isinstance(msg, dict):
+            content = msg.get("content")
+        if role is not None:
+            attrs[f"gen_ai.prompt.{i}.role"] = str(role)
+        if content is not None:
+            attrs[f"gen_ai.prompt.{i}.content"] = _content_to_string(content)
+
+
+def _start_retry_attempt(id_: str, instance: Any, bound_args: Any = None) -> None:
     parent_span = trace.get_current_span()
     if parent_span is None or not parent_span.get_span_context().is_valid:
         # No ambient parent → orphan retry_attempt would have no place
@@ -227,6 +271,7 @@ def _start_retry_attempt(id_: str, instance: Any) -> None:
         attrs["gen_ai.system"] = routed_provider
     if model:
         attrs["gen_ai.request.model"] = model
+    _add_prompt_attrs(attrs, bound_args)
 
     tracer = trace.get_tracer(__name__, __version__)
     parent_ctx = set_span_in_context(parent_span)
@@ -387,7 +432,7 @@ class _FortifyRootRetryHandler(BaseSpanHandler):
         try:
             if not _is_outer_llm_method(id_, instance):
                 return None
-            _start_retry_attempt(id_, instance)
+            _start_retry_attempt(id_, instance, bound_args)
         except Exception:
             logger.debug("new_span retry-attempt-start failed", exc_info=True)
         return None

@@ -1,5 +1,6 @@
 """OpenTelemetry Langchain instrumentation"""
 
+import inspect
 import logging
 from typing import Any, Collection, Optional
 
@@ -332,13 +333,31 @@ class _OpenAITracingWrapper:
             suppression_token = None
 
         try:
-            return wrapped(*args, **kwargs)
+            result = wrapped(*args, **kwargs)
+        except Exception:
+            self._detach_suppression(suppression_token)
+            raise
+
+        if inspect.isawaitable(result):
+            return self._await_with_suppression_cleanup(result, suppression_token)
+
+        self._detach_suppression(suppression_token)
+        return result
+
+    async def _await_with_suppression_cleanup(self, awaitable, suppression_token):
+        try:
+            return await awaitable
         finally:
-            if suppression_token is not None:
-                try:
-                    context_api.detach(suppression_token)
-                except Exception:
-                    # Detach can fail in async/concurrent edge cases —
-                    # safe to ignore; the context value's lifetime
-                    # is bounded by the surrounding context frame anyway.
-                    pass
+            self._detach_suppression(suppression_token)
+
+    @staticmethod
+    def _detach_suppression(suppression_token) -> None:
+        if suppression_token is None:
+            return
+        try:
+            context_api.detach(suppression_token)
+        except Exception:
+            # Detach can fail in async/concurrent edge cases — safe to
+            # ignore because this is a best-effort suppression fallback
+            # for legacy LangChain OpenAI wrappers.
+            pass

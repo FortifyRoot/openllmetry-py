@@ -31,6 +31,7 @@ the retry_attempts emitted here.
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time
@@ -43,7 +44,15 @@ from opentelemetry.instrumentation.fortifyroot import (
     register_framework_attempt,
     unregister_framework_attempt,
 )
+from opentelemetry.instrumentation.langchain.span_utils import _message_type_to_role
+from opentelemetry.instrumentation.langchain.utils import (
+    CallbackFilteredJSONEncoder,
+    should_send_prompts,
+)
 from opentelemetry.instrumentation.langchain.version import __version__
+from opentelemetry.semconv._incubating.attributes import (
+    gen_ai_attributes as GenAIAttributes,
+)
 from opentelemetry.trace import SpanKind, Status, StatusCode, set_span_in_context
 
 logger = logging.getLogger(__name__)
@@ -294,12 +303,67 @@ def _resolve_model(serialized: Optional[dict], invocation_params: Optional[dict]
     return None
 
 
+def _content_to_string(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    try:
+        return json.dumps(content, cls=CallbackFilteredJSONEncoder)
+    except Exception:
+        return str(content)
+
+
+def _add_prompt_attrs(
+    attrs: dict[str, Any],
+    *,
+    messages: Optional[list[list[Any]]] = None,
+    prompts: Optional[list[str]] = None,
+) -> None:
+    """Copy LangChain's request content onto the retry_attempt span.
+
+    Backend §4.5 makes retry_attempt the canonical LLMUsageEvent span
+    when it exists. Safety E2E tests and customers looking up the
+    canonical event therefore still need the same prompt content that
+    Traceloop's normal LLM span carries. The callback receives prompts
+    after FR prompt-safety masking, so these attributes preserve the
+    existing masked/plaintext semantics.
+    """
+    try:
+        if not should_send_prompts():
+            return
+    except Exception:
+        return
+
+    if prompts is not None:
+        for i, prompt in enumerate(prompts):
+            if not isinstance(prompt, str):
+                continue
+            attrs[f"{GenAIAttributes.GEN_AI_PROMPT}.{i}.role"] = "user"
+            attrs[f"{GenAIAttributes.GEN_AI_PROMPT}.{i}.content"] = prompt
+        return
+
+    if messages is None:
+        return
+
+    i = 0
+    for message_group in messages:
+        for msg in message_group:
+            msg_type = getattr(msg, "type", None)
+            if isinstance(msg_type, str):
+                attrs[f"{GenAIAttributes.GEN_AI_PROMPT}.{i}.role"] = _message_type_to_role(msg_type)
+            content = getattr(msg, "content", None)
+            if content is not None:
+                attrs[f"{GenAIAttributes.GEN_AI_PROMPT}.{i}.content"] = _content_to_string(content)
+            i += 1
+
+
 def _start_retry_attempt(
     run_id: UUID,
     parent_run_id: Optional[UUID],
     serialized: Optional[dict],
     invocation_params: Optional[dict],
     traceloop_handler: Optional[Any] = None,
+    messages: Optional[list[list[Any]]] = None,
+    prompts: Optional[list[str]] = None,
 ) -> None:
     """Open the retry_attempt sibling span and register state.
     Idempotent if called twice for the same run_id (defensive — the
@@ -329,6 +393,7 @@ def _start_retry_attempt(
         attrs["gen_ai.system"] = routed_provider
     if model:
         attrs["gen_ai.request.model"] = model
+    _add_prompt_attrs(attrs, messages=messages, prompts=prompts)
 
     tracer = trace.get_tracer(__name__, __version__)
     parent_ctx = set_span_in_context(parent_span)
@@ -512,6 +577,7 @@ class _FortifyRootRetryHandler(BaseCallbackHandler):
             _start_retry_attempt(
                 run_id, parent_run_id, serialized, invocation_params,
                 traceloop_handler=self._traceloop_handler,
+                messages=messages,
             )
         except Exception:
             logger.debug("on_chat_model_start retry-attempt-start failed", exc_info=True)
@@ -532,6 +598,7 @@ class _FortifyRootRetryHandler(BaseCallbackHandler):
             _start_retry_attempt(
                 run_id, parent_run_id, serialized, invocation_params,
                 traceloop_handler=self._traceloop_handler,
+                prompts=prompts,
             )
         except Exception:
             logger.debug("on_llm_start retry-attempt-start failed", exc_info=True)

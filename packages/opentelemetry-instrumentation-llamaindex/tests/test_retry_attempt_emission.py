@@ -125,6 +125,11 @@ def _empty_bound_args():
     return sig.bind()
 
 
+def _prompt_bound_args(prompt: str):
+    sig = inspect.signature(lambda prompt: None)
+    return sig.bind(prompt)
+
+
 def _make_id(class_name: str, method: str) -> str:
     """Mimic LlamaIndex's dispatcher span id format
     ``ClassName.method-uuid``."""
@@ -246,8 +251,12 @@ def test_single_attempt_emits_one_retry_attempt(fresh_tracer):
 
     parent = tracer.start_span("workflow")
     with trace.use_span(parent, end_on_exit=False):
-        id_ = _make_id("FakeLLM", "chat")
-        handler.new_span(id_=id_, bound_args=_empty_bound_args(), instance=instance)
+        id_ = _make_id("FakeLLM", "complete")
+        handler.new_span(
+            id_=id_,
+            bound_args=_prompt_bound_args("hello masked [EMAIL]"),
+            instance=instance,
+        )
         handler.prepare_to_exit_span(
             id_=id_, bound_args=_empty_bound_args(),
             instance=instance,
@@ -269,6 +278,8 @@ def test_single_attempt_emits_one_retry_attempt(fresh_tracer):
     assert retry_span.attributes.get("gen_ai.response.id") == "resp-001"
     assert retry_span.attributes.get("gen_ai.usage.input_tokens") == 10
     assert retry_span.attributes.get("gen_ai.usage.output_tokens") == 5
+    assert retry_span.attributes.get("gen_ai.prompt.0.role") == "user"
+    assert retry_span.attributes.get("gen_ai.prompt.0.content") == "hello masked [EMAIL]"
 
 
 # ---------------------------------------------------------------------------
