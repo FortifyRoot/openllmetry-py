@@ -22,6 +22,9 @@ from opentelemetry.instrumentation.bedrock.guardrail import (
     guardrail_handling,
 )
 from opentelemetry.instrumentation.bedrock.prompt_caching import prompt_caching_handling
+from opentelemetry.instrumentation.bedrock.retry_handler import (
+    install_event_hooks_on_client,
+)
 from opentelemetry.instrumentation.bedrock.reusable_streaming_body import (
     ReusableStreamingBody,
 )
@@ -60,6 +63,7 @@ from opentelemetry.semconv_ai import (
     SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY,
     Meters,
 )
+from opentelemetry import trace
 from opentelemetry.trace import Span, SpanKind, get_tracer
 from wrapt import wrap_function_wrapper
 
@@ -121,13 +125,21 @@ def is_metrics_enabled() -> bool:
 
 
 def _with_tracer_wrapper(func):
-    """Helper for providing tracer for wrapper functions."""
+    """Helper for providing tracer for wrapper functions.
+
+    ``tracer_provider`` (added 2026-05-16 for the ST-10.4 review-driven
+    fix) is plumbed alongside the tracer so the bedrock-runtime client
+    wrap can pass it to ``install_event_hooks_on_client`` — letting the
+    retry handler's event hooks emit spans through the same provider
+    the rest of the instrumentor uses.
+    """
 
     def _with_tracer(
         tracer,
         metric_params,
         event_logger,
         to_wrap,
+        tracer_provider=None,
     ):
         def wrapper(wrapped, instance, args, kwargs):
             return func(
@@ -135,6 +147,7 @@ def _with_tracer_wrapper(func):
                 metric_params,
                 event_logger,
                 to_wrap,
+                tracer_provider,
                 wrapped,
                 instance,
                 args,
@@ -152,6 +165,7 @@ def _wrap(
     metric_params,
     event_logger,
     to_wrap,
+    tracer_provider,
     wrapped,
     instance,
     args,
@@ -183,6 +197,13 @@ def _wrap(
             client.converse_stream = _instrumented_converse_stream(
                 client.converse_stream, tracer, metric_params, event_logger
             )
+            # ST-10.4: register per-attempt botocore event hooks on the
+            # bedrock-runtime client. Public botocore API; emits one
+            # retry_attempt sibling span per HTTP attempt under the outer
+            # bedrock.completion / bedrock.converse span. ``tracer_provider``
+            # is passed so retry_attempt spans go to the same provider as
+            # the bedrock logical span — review-driven 2026-05-16 fix.
+            install_event_hooks_on_client(client, tracer_provider=tracer_provider)
             return client
         except Exception as e:
             end_time = time.time()
@@ -229,8 +250,17 @@ def _instrumented_model_invoke_with_response_stream(
 
         span = tracer.start_span(_BEDROCK_INVOKE_SPAN_NAME, kind=SpanKind.CLIENT)
 
+        # ST-10.4: make the streaming span the AMBIENT OTel context for
+        # the duration of the underlying boto3 call so per-attempt
+        # botocore event hooks (before-send.bedrock-runtime.*) can
+        # resolve this span as the retry_attempt parent. The span is
+        # NOT ended here — the streaming wrapper installed in
+        # ``_handle_stream_call`` owns the eventual ``span.end()`` once
+        # the response stream is fully consumed (which is why
+        # ``start_as_current_span`` cannot be used directly).
         kwargs = _apply_invoke_prompt_safety(span, kwargs, _BEDROCK_INVOKE_SPAN_NAME)
-        response = fn(*args, **kwargs)
+        with trace.use_span(span, end_on_exit=False):
+            response = fn(*args, **kwargs)
         _handle_stream_call(span, kwargs, response, metric_params, event_logger)
 
         return response
@@ -267,7 +297,10 @@ def _instrumented_converse_stream(fn, tracer, metric_params, event_logger):
 
         span = tracer.start_span(_BEDROCK_CONVERSE_SPAN_NAME, kind=SpanKind.CLIENT)
         kwargs = _apply_converse_prompt_safety(span, kwargs, _BEDROCK_CONVERSE_SPAN_NAME)
-        response = fn(*args, **kwargs)
+        # ST-10.4: see _instrumented_model_invoke_with_response_stream
+        # for the rationale on use_span(end_on_exit=False).
+        with trace.use_span(span, end_on_exit=False):
+            response = fn(*args, **kwargs)
         if span.is_recording():
             _handle_converse_stream(span, kwargs, response, metric_params, event_logger)
 
@@ -631,6 +664,7 @@ class BedrockInstrumentor(BaseInstrumentor):
                     metric_params,
                     event_logger,
                     wrapped_method,
+                    tracer_provider=tracer_provider,
                 ),
             )
 

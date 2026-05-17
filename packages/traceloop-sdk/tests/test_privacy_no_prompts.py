@@ -8,6 +8,24 @@ from opentelemetry.semconv._incubating.attributes import (
 from traceloop.sdk.decorators import workflow, task
 
 
+# ST-10.4: ``fortifyroot.openai.retry_attempt`` (and equivalents for
+# anthropic / bedrock / framework wrappers) lands in this test's
+# session-scoped exporter ahead of the logical ``openai.chat`` span.
+# Filter by the canonical ``fortifyroot.span.role`` attribute so every
+# provider's retry_attempt is dropped uniformly. See
+# fr-system-tests/docs/development/ai-logs/st_phase_10.txt addendum
+# 2026-05-16 for context.
+_FR_SPAN_ROLE_KEY = "fortifyroot.span.role"
+_FR_SPAN_ROLE_RETRY_ATTEMPT = "retry_attempt"
+
+
+def _without_retry_attempt_spans(spans):
+    return [
+        s for s in spans
+        if (s.attributes or {}).get(_FR_SPAN_ROLE_KEY) != _FR_SPAN_ROLE_RETRY_ATTEMPT
+    ]
+
+
 @pytest.fixture(autouse=True)
 def disable_trace_content():
     os.environ["TRACELOOP_TRACE_CONTENT"] = "false"
@@ -38,13 +56,13 @@ def test_simple_workflow(exporter, openai_client):
 
     joke_workflow()
 
-    spans = exporter.get_finished_spans()
+    spans = _without_retry_attempt_spans(exporter.get_finished_spans())
     assert [span.name for span in spans] == [
         "openai.chat",
         "joke_creation.task",
         "pirate_joke_generator.workflow",
     ]
-    open_ai_span = spans[0]
+    open_ai_span = next(s for s in spans if s.name == "openai.chat")
     assert open_ai_span.attributes[GenAIAttributes.GEN_AI_USAGE_INPUT_TOKENS] == 15
     assert not open_ai_span.attributes.get(f"{GenAIAttributes.GEN_AI_PROMPT}.0.content")
     assert not open_ai_span.attributes.get(

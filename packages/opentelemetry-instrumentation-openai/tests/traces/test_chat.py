@@ -3,6 +3,7 @@ import logging
 from unittest.mock import patch
 
 import httpx
+from openai import _base_client  # ST-10.4: spy target for retry-aware httpx wrap
 import pytest
 from openai.resources.chat.completions import Completions
 from openai.types.chat.chat_completion_message_tool_call import (
@@ -1119,8 +1120,8 @@ def test_with_asyncio_run_with_events_with_no_content(
 def test_chat_context_propagation(
     instrument_legacy, span_exporter, log_exporter, vllm_openai_client
 ):
-    send_spy = spy_decorator(httpx.Client.send)
-    with patch.object(httpx.Client, "send", send_spy):
+    send_spy = spy_decorator(_base_client.SyncHttpxClientWrapper.send)
+    with patch.object(_base_client.SyncHttpxClientWrapper, "send", send_spy):
         vllm_openai_client.chat.completions.create(
             model="meta-llama/Llama-3.2-1B-Instruct",
             messages=[
@@ -1153,8 +1154,8 @@ def test_chat_context_propagation(
 def test_chat_context_propagation_with_events_with_content(
     instrument_with_content, span_exporter, log_exporter, vllm_openai_client
 ):
-    send_spy = spy_decorator(httpx.Client.send)
-    with patch.object(httpx.Client, "send", send_spy):
+    send_spy = spy_decorator(_base_client.SyncHttpxClientWrapper.send)
+    with patch.object(_base_client.SyncHttpxClientWrapper, "send", send_spy):
         vllm_openai_client.chat.completions.create(
             model="meta-llama/Llama-3.2-1B-Instruct",
             messages=[
@@ -1206,8 +1207,8 @@ def test_chat_context_propagation_with_events_with_content(
 def test_chat_context_propagation_with_events_with_no_content(
     instrument_with_no_content, span_exporter, log_exporter, vllm_openai_client
 ):
-    send_spy = spy_decorator(httpx.Client.send)
-    with patch.object(httpx.Client, "send", send_spy):
+    send_spy = spy_decorator(_base_client.SyncHttpxClientWrapper.send)
+    with patch.object(_base_client.SyncHttpxClientWrapper, "send", send_spy):
         vllm_openai_client.chat.completions.create(
             model="meta-llama/Llama-3.2-1B-Instruct",
             messages=[
@@ -1247,8 +1248,8 @@ def test_chat_context_propagation_with_events_with_no_content(
 async def test_chat_async_context_propagation(
     instrument_legacy, span_exporter, log_exporter, async_vllm_openai_client
 ):
-    send_spy = spy_decorator(httpx.AsyncClient.send)
-    with patch.object(httpx.AsyncClient, "send", send_spy):
+    send_spy = spy_decorator(_base_client.AsyncHttpxClientWrapper.send)
+    with patch.object(_base_client.AsyncHttpxClientWrapper, "send", send_spy):
         await async_vllm_openai_client.chat.completions.create(
             model="meta-llama/Llama-3.2-1B-Instruct",
             messages=[
@@ -1282,8 +1283,8 @@ async def test_chat_async_context_propagation(
 async def test_chat_async_context_propagation_with_events_with_content(
     instrument_with_content, span_exporter, log_exporter, async_vllm_openai_client
 ):
-    send_spy = spy_decorator(httpx.AsyncClient.send)
-    with patch.object(httpx.AsyncClient, "send", send_spy):
+    send_spy = spy_decorator(_base_client.AsyncHttpxClientWrapper.send)
+    with patch.object(_base_client.AsyncHttpxClientWrapper, "send", send_spy):
         await async_vllm_openai_client.chat.completions.create(
             model="meta-llama/Llama-3.2-1B-Instruct",
             messages=[
@@ -1336,8 +1337,8 @@ async def test_chat_async_context_propagation_with_events_with_content(
 async def test_chat_async_context_propagation_with_events_with_no_content(
     instrument_with_no_content, span_exporter, log_exporter, async_vllm_openai_client
 ):
-    send_spy = spy_decorator(httpx.AsyncClient.send)
-    with patch.object(httpx.AsyncClient, "send", send_spy):
+    send_spy = spy_decorator(_base_client.AsyncHttpxClientWrapper.send)
+    with patch.object(_base_client.AsyncHttpxClientWrapper, "send", send_spy):
         await async_vllm_openai_client.chat.completions.create(
             model="meta-llama/Llama-3.2-1B-Instruct",
             messages=[

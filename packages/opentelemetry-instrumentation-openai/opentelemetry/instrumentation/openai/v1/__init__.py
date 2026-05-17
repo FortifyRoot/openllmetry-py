@@ -42,6 +42,10 @@ from opentelemetry.instrumentation.openai.v1.responses_wrappers import (
 from opentelemetry.instrumentation.openai.v1.realtime_wrappers import (
     realtime_connect_wrapper,
 )
+from opentelemetry.instrumentation.openai.retry_handler import (
+    instrument_retry_emitter,
+    uninstrument_retry_emitter,
+)
 
 from opentelemetry.instrumentation.openai.version import __version__
 from opentelemetry.metrics import get_meter
@@ -350,7 +354,19 @@ class OpenAIV1Instrumentor(BaseInstrumentor):
             realtime_connect_wrapper(tracer),
         )
 
+        # ST-10.4: per-attempt retry_attempt emission via private
+        # ``openai._base_client`` httpx wrapper classes. Guarded against
+        # missing private symbols (logs warning + skips emission). Pass
+        # the same tracer_provider the rest of the instrumentor uses so
+        # retry_attempt spans land in the same exporter as the openai
+        # logical span (e.g. ``openai.chat``) — without this, a
+        # consumer passing an explicit provider would get the parent
+        # span on their provider but the retry_attempt span lost to the
+        # global no-op tracer.
+        instrument_retry_emitter(tracer_provider=tracer_provider)
+
     def _uninstrument(self, **kwargs):
+        uninstrument_retry_emitter()  # ST-10.4 symmetry
         unwrap_dotted_method("openai.resources.chat.completions", "Completions.create")
         unwrap_dotted_method("openai.resources.completions", "Completions.create")
         unwrap_dotted_method("openai.resources.embeddings", "Embeddings.create")

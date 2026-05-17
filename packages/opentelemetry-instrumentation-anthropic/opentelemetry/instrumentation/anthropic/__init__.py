@@ -13,6 +13,10 @@ from opentelemetry.instrumentation.anthropic.event_emitter import (
     emit_input_events,
     emit_response_events,
 )
+from opentelemetry.instrumentation.anthropic.retry_handler import (
+    instrument_retry_emitter,
+    uninstrument_retry_emitter,
+)
 from opentelemetry.instrumentation.anthropic.safety import (
     _apply_completion_safety,
     _apply_prompt_safety,
@@ -50,6 +54,7 @@ from opentelemetry.semconv_ai import (
     Meters,
     SpanAttributes,
 )
+from opentelemetry import trace
 from opentelemetry.trace import Span, SpanKind, Tracer, get_tracer
 from opentelemetry.trace.status import Status, StatusCode
 from typing_extensions import Coroutine
@@ -548,8 +553,23 @@ def _wrap(
     kwargs = _apply_prompt_safety(span, kwargs, name)
     _handle_input(span, event_logger, kwargs)
     start_time = time.time()
+    # ST-10.4 (review-driven 2026-05-17): make the anthropic.chat span
+    # the AMBIENT OTel context for the duration of the SDK call so the
+    # FortifyRoot retry handler (wrapping
+    # ``anthropic._base_client.SyncHttpxClientWrapper.send``) can
+    # resolve this span as the retry_attempt parent via
+    # ``trace.get_current_span()``. Without this, the wrapped()
+    # call sees whatever ambient was active BEFORE this wrapper
+    # opened anthropic.chat — typically the invalid default span —
+    # so the retry hook's no-parent guard fires and no
+    # retry_attempt span is emitted. Mirrors the same pattern openai
+    # chat_wrapper has used since vendoring; bedrock non-streaming
+    # already uses ``start_as_current_span``. ``end_on_exit=False``
+    # because we close the span manually below after streaming /
+    # response handling.
     try:
-        response = wrapped(*args, **kwargs)
+        with trace.use_span(span, end_on_exit=False):
+            response = wrapped(*args, **kwargs)
     except Exception as e:  # pylint: disable=broad-except
         end_time = time.time()
         attributes = error_metrics_attributes(e)
@@ -672,8 +692,11 @@ async def _awrap(
     kwargs = await asyncio.to_thread(_apply_prompt_safety, span, kwargs, name)  # FR: async safety
     await _ahandle_input(span, event_logger, kwargs)
     start_time = time.time()
+    # ST-10.4 (review-driven 2026-05-17): see sync _wrap above for
+    # rationale on use_span(end_on_exit=False) around the wrapped call.
     try:
-        response = await wrapped(*args, **kwargs)
+        with trace.use_span(span, end_on_exit=False):
+            response = await wrapped(*args, **kwargs)
     except Exception as e:  # pylint: disable=broad-except
         end_time = time.time()
         attributes = error_metrics_attributes(e)
@@ -867,7 +890,16 @@ class AnthropicInstrumentor(BaseInstrumentor):
             except Exception:
                 pass  # that's ok, we don't want to fail if some methods do not exist
 
+        # ST-10.4: per-attempt retry_attempt emission via private
+        # ``anthropic._base_client`` httpx wrapper classes. Guarded
+        # against missing private symbols (logs warning + skips emission).
+        # Pass the same tracer_provider the rest of the instrumentor
+        # uses so retry_attempt spans land in the same exporter as the
+        # anthropic logical span (review-driven 2026-05-16 fix).
+        instrument_retry_emitter(tracer_provider=tracer_provider)
+
     def _uninstrument(self, **kwargs):
+        uninstrument_retry_emitter()  # ST-10.4 symmetry
         for wrapped_method in WRAPPED_METHODS:
             wrap_package = wrapped_method.get("package")
             wrap_object = wrapped_method.get("object")

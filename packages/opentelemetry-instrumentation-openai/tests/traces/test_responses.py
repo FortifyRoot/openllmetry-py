@@ -529,14 +529,24 @@ def test_responses_trace_context_propagation_unit():
     from opentelemetry.instrumentation.openai.v1.responses_wrappers import TracedData
     import time
 
-    # Set up tracing
+    # Set up tracing. Use the LOCAL provider directly via
+    # ``provider.get_tracer(...)`` and DO NOT call
+    # ``trace.set_tracer_provider(provider)`` — OTel only allows the
+    # global TracerProvider to be set once per process. The ST-10.4
+    # retry-attempt test suite (which runs before this test under
+    # ``--all``) already sets a global provider via its ``fresh_tracer``
+    # fixture; a second ``set_tracer_provider`` call would silently
+    # no-op (only logging "Overriding of current TracerProvider is not
+    # allowed"), leaving ``trace.get_tracer(__name__)`` bound to the
+    # earlier global — so this test's local ``exporter`` would never
+    # receive spans and the assertion `len(parent_spans) == 1` would
+    # fail in full-suite order (review-driven 2026-05-16 fix).
     provider = TracerProvider()
     exporter = InMemorySpanExporter()
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 
     provider.add_span_processor(SimpleSpanProcessor(exporter))
-    trace.set_tracer_provider(provider)
-    tracer = trace.get_tracer(__name__)
+    tracer = provider.get_tracer(__name__)
 
     # Create a parent span and capture its trace context
     with tracer.start_as_current_span("parent-span") as parent_span:

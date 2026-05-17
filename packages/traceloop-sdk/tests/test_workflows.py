@@ -13,6 +13,22 @@ from traceloop.sdk import Traceloop
 from traceloop.sdk.decorators import workflow, task
 
 
+# ST-10.4: filter ``fortifyroot.*.retry_attempt`` sibling spans out
+# of legacy exact-span-list / set assertions. Role-based filter so
+# every provider's retry_attempt (openai, anthropic, bedrock,
+# langchain, llamaindex, litellm) is dropped uniformly. See addendum
+# 2026-05-16 in st_phase_10.txt for context.
+_FR_SPAN_ROLE_KEY = "fortifyroot.span.role"
+_FR_SPAN_ROLE_RETRY_ATTEMPT = "retry_attempt"
+
+
+def _without_retry_attempt_spans(spans):
+    return [
+        s for s in spans
+        if (s.attributes or {}).get(_FR_SPAN_ROLE_KEY) != _FR_SPAN_ROLE_RETRY_ATTEMPT
+    ]
+
+
 @pytest.fixture
 def openai_client():
     return OpenAI()
@@ -40,7 +56,7 @@ def test_simple_workflow(exporter, openai_client):
 
     joke = joke_workflow()
 
-    spans = exporter.get_finished_spans()
+    spans = _without_retry_attempt_spans(exporter.get_finished_spans())
     assert [span.name for span in spans] == [
         "openai.chat",
         "something_creator.task",
@@ -86,7 +102,7 @@ async def test_simple_aworkflow(exporter, async_openai_client):
 
     joke = await joke_workflow()
 
-    spans = exporter.get_finished_spans()
+    spans = _without_retry_attempt_spans(exporter.get_finished_spans())
     assert [span.name for span in spans] == [
         "openai.chat",
         "something_creator.task",
@@ -139,7 +155,7 @@ def test_streaming_workflow(exporter, openai_client):
 
     joke_workflow()
 
-    spans = exporter.get_finished_spans()
+    spans = _without_retry_attempt_spans(exporter.get_finished_spans())
     assert set([span.name for span in spans]) == set(
         [
             "openai.chat",
