@@ -363,9 +363,35 @@ def _before_send_hook(event_name: Optional[str] = None, request: Any = None, **_
         logger.debug("ST-10.4: bedrock before-send hook failed", exc_info=True)
 
 
+class _ResponseDictAdapter:
+    """Minimal adapter so ``_finalize_success`` can read ``status_code``
+    + ``headers`` uniformly from either an httpx-style response object
+    (``.status_code``, ``.headers``) OR botocore's ``response_dict``
+    (a plain dict with ``'status_code'`` + ``'headers'`` keys).
+
+    botocore 1.42.x (and likely earlier point-releases) emits the
+    ``response-received`` event with ``response_dict=`` + ``parsed_response=``
+    kwargs — NOT ``http_response=`` + ``parsed=``. The earlier hook
+    signature missed both rename pairs, leaving the retry_attempt span
+    with no status code, no OK/ERROR status, and ``IsError=False`` for
+    every attempt. Backend's RetryDetector then skipped the whole
+    sibling group on its ``failedCount == 0`` check.
+    """
+
+    __slots__ = ("status_code", "headers")
+
+    def __init__(self, response_dict: dict) -> None:
+        sc = response_dict.get("status_code")
+        self.status_code = sc if isinstance(sc, int) else None
+        h = response_dict.get("headers")
+        self.headers = h if isinstance(h, dict) else {}
+
+
 def _response_received_hook(
     http_response: Any = None,
     parsed: Any = None,
+    response_dict: Any = None,
+    parsed_response: Any = None,
     context: Any = None,
     exception: Any = None,
     **_kwargs,
@@ -375,6 +401,17 @@ def _response_received_hook(
     Finalises the retry_attempt span started by the paired
     ``before-send`` hook. ``context`` is the per-request context dict
     (same dict referenced by ``request.context`` at before-send time).
+
+    Accepts BOTH botocore parameter-name conventions:
+      * ``http_response`` + ``parsed`` (older botocore signature the
+        fork-side unit tests drive directly).
+      * ``response_dict`` + ``parsed_response`` (botocore 1.42.x — the
+        names the real event emitter actually uses; verified via
+        ST-10.6 fr-system-tests probe).
+
+    Per-attempt finalisation reads ``status_code`` and ``headers`` from
+    whichever shape is present; the rest of the body just falls through
+    to ``_finalize_success`` / ``_finalize_error``.
     """
     try:
         if not isinstance(context, dict):
@@ -384,6 +421,16 @@ def _response_received_hook(
         context.pop(_CTX_TOKEN_KEY, None)
         if span is None:
             return
+
+        # Reconcile old/new botocore param names.  If both are present
+        # (unlikely, but defensive), prefer the explicit older names so
+        # the existing unit tests' direct invocation path is not
+        # disturbed.
+        if http_response is None and isinstance(response_dict, dict):
+            http_response = _ResponseDictAdapter(response_dict)
+        if parsed is None and parsed_response is not None:
+            parsed = parsed_response
+
         try:
             if exception is not None:
                 _finalize_error(span, exception)
