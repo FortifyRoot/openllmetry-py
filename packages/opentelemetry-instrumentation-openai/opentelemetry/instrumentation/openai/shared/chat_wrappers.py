@@ -58,6 +58,9 @@ from opentelemetry.semconv_ai import (
     LLMRequestTypeValues,
     SpanAttributes,
 )
+from opentelemetry.instrumentation.openai.retry_handler import (
+    OPENAI_DIRECT_RETRY_PARENT_ACTIVE_KEY,
+)
 from opentelemetry.trace import SpanKind, Tracer
 from opentelemetry import trace
 from opentelemetry.trace.status import Status, StatusCode
@@ -104,12 +107,22 @@ def chat_wrapper(
         run_async(_handle_request(span, kwargs, instance))
         try:
             start_time = time.time()
-            token = context_api.attach(
-                context_api.set_value(
-                    SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY,
-                    True,
-                )
+            # ST-10.4 (review-driven 2026-05-16): set
+            # OPENAI_DIRECT_RETRY_PARENT_ACTIVE_KEY alongside the
+            # existing SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY so
+            # the FortifyRoot retry handler can distinguish this
+            # "openai wrapper's own internal HTTP send" case from
+            # external user/framework suppression and emit
+            # retry_attempt spans under the ``openai.chat`` parent.
+            # The SUPPRESS key still protects against OTHER LLM
+            # instrumentors double-counting this call.
+            attempt_ctx = context_api.set_value(
+                SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY, True,
             )
+            attempt_ctx = context_api.set_value(
+                OPENAI_DIRECT_RETRY_PARENT_ACTIVE_KEY, True, attempt_ctx,
+            )
+            token = context_api.attach(attempt_ctx)
             try:
                 response = wrapped(*args, **kwargs)
             finally:
@@ -214,12 +227,15 @@ async def achat_wrapper(
 
         try:
             start_time = time.time()
-            token = context_api.attach(
-                context_api.set_value(
-                    SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY,
-                    True,
-                )
+            # ST-10.4 (review-driven 2026-05-16): see sync chat_wrapper
+            # above for the rationale on OPENAI_DIRECT_RETRY_PARENT_ACTIVE_KEY.
+            attempt_ctx = context_api.set_value(
+                SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY, True,
             )
+            attempt_ctx = context_api.set_value(
+                OPENAI_DIRECT_RETRY_PARENT_ACTIVE_KEY, True, attempt_ctx,
+            )
+            token = context_api.attach(attempt_ctx)
             try:
                 response = await wrapped(*args, **kwargs)
             finally:

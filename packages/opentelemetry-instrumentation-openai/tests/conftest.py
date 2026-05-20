@@ -27,6 +27,35 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 pytest_plugins = []
 
 
+class _NoFortifyRootSpanExporter(InMemorySpanExporter):
+    """ST-10.4: filter out any span whose name starts with
+    ``fortifyroot.`` from the upstream-test span exporter.
+
+    ST-10.4 added per-attempt sibling spans (e.g.
+    ``fortifyroot.openai.retry_attempt``) under every openai logical
+    call. Upstream/legacy OpenAI tests assert exact span-name lists
+    (e.g. ``[span.name for span in spans] == ["openai.chat"]``); without
+    a filter, every such assertion would now fail because the
+    retry_attempt sibling is also exported.
+
+    Mirrors the same pattern used by the LangChain test conftest from
+    the 2026-05-15 CI-hardening addendum. ST-10.4 unit tests in
+    ``tests/test_retry_attempt_emission.py`` use their own ``fresh_tracer``
+    fixture (not this one), so they continue to see retry_attempt
+    spans and aren't affected by the filter.
+    """
+
+    def get_finished_spans(self):  # type: ignore[override]
+        # Filter by role rather than name prefix so legitimate
+        # fortifyroot.*.safety / .llm_wrapper / .has_native_otel_child
+        # spans remain visible to tests that inspect them. Only
+        # ST-10.4 retry_attempt siblings carry role=retry_attempt.
+        return tuple(
+            s for s in super().get_finished_spans()
+            if (s.attributes or {}).get("fortifyroot.span.role") != "retry_attempt"
+        )
+
+
 @pytest.fixture(autouse=True)
 def environment():
     if not os.getenv("OPENAI_API_KEY"):
@@ -89,7 +118,7 @@ def async_vllm_openai_client():
 
 @pytest.fixture(scope="session", name="span_exporter")
 def fixture_span_exporter():
-    exporter = InMemorySpanExporter()
+    exporter = _NoFortifyRootSpanExporter()
     yield exporter
 
 

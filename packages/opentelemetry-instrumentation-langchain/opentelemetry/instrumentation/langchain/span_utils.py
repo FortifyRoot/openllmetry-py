@@ -28,7 +28,7 @@ from opentelemetry.trace.span import Span
 @dataclass
 class SpanHolder:
     span: Span
-    token: Any
+    token: Any  # Retained for backward compat; new code should use ``tokens``.
     context: Context
     children: list[UUID]
     workflow_name: str
@@ -36,6 +36,14 @@ class SpanHolder:
     entity_path: str
     start_time: float = field(default_factory=time.time)
     request_model: Optional[str] = None
+    # ST-10 review-round-2 fix (2026-05-11): every context_api.attach()
+    # performed for this span — span-context, suppression, metadata
+    # association_properties — appended here in attach order. ``_end_span``
+    # detaches them in REVERSE order (LIFO) so OTel's context stack is
+    # popped to the correct level. The legacy ``token`` field above is
+    # kept as-is for code that reads it directly; new code should append
+    # to ``tokens`` and detach via this list.
+    tokens: list[Any] = field(default_factory=list)
 
 
 def _message_type_to_role(message_type: str) -> str:

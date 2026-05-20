@@ -186,9 +186,23 @@ class TraceloopCallbackHandler(BaseCallbackHandler):
                 if child_span.end_time is None:  # avoid warning on ended spans
                     child_span.end()
         span.end()
-        token = self.spans[run_id].token
-        if token:
-            self._safe_detach_context(token)
+        # ST-10 review-round-2 fix (2026-05-11): detach ALL attached
+        # tokens in LIFO order (reverse of attach). Pre-fix, only the
+        # single ``token`` field was detached — which for LLM spans
+        # was the suppression token only, leaving the span-context
+        # token leaked and the ended LLM span permanently "current"
+        # in OTel context. See SpanHolder.tokens.
+        tokens_to_detach = list(self.spans[run_id].tokens)
+        for tok in reversed(tokens_to_detach):
+            if tok is not None:
+                self._safe_detach_context(tok)
+        # Legacy single-token path retained for any direct external
+        # readers of SpanHolder.token (unchanged contract). If the
+        # legacy token isn't already part of ``tokens`` (defensive),
+        # detach it too — _safe_detach_context is idempotent.
+        legacy_token = self.spans[run_id].token
+        if legacy_token is not None and legacy_token not in tokens_to_detach:
+            self._safe_detach_context(legacy_token)
 
         del self.spans[run_id]
 
@@ -250,6 +264,19 @@ class TraceloopCallbackHandler(BaseCallbackHandler):
         entity_path: str = "",
         metadata: Optional[dict[str, Any]] = None,
     ) -> Span:
+        # ST-10 review-round-2 fix (2026-05-11): capture every
+        # context_api.attach()'s return token and append to the
+        # SpanHolder's ``tokens`` list. ``_end_span`` detaches them in
+        # LIFO order. Pre-fix, the metadata-association attach below
+        # was made WITHOUT capturing its token, and the span-context
+        # attach later overwrote the SpanHolder's single ``token``
+        # field with the suppression token (in ``_create_llm_span``).
+        # Result: every LangChain LLM span permanently leaked its
+        # span-context attach, leaving the ended span "current" in OTel
+        # context past the end of the LangChain test, which polluted
+        # later LiteLLM / LlamaIndex tests in the same pytest session
+        # (session-scoped sdk_helper). See review-round-2 Blocker 1.
+        attached_tokens: list[Any] = []
         if metadata is not None:
             current_association_properties = (
                 context_api.get_value("association_properties") or {}
@@ -261,12 +288,14 @@ class TraceloopCallbackHandler(BaseCallbackHandler):
                 if v is not None
             }
             try:
-                context_api.attach(
+                metadata_token = context_api.attach(
                     context_api.set_value(
                         "association_properties",
                         {**current_association_properties, **sanitized_metadata},
                     )
                 )
+                if metadata_token is not None:
+                    attached_tokens.append(metadata_token)
             except Exception:
                 # If setting association properties fails, continue without them
                 # This doesn't affect the core span functionality
@@ -281,7 +310,9 @@ class TraceloopCallbackHandler(BaseCallbackHandler):
         else:
             span = self.tracer.start_span(span_name, kind=kind)
 
-        token = self._safe_attach_context(span)
+        span_context_token = self._safe_attach_context(span)
+        if span_context_token is not None:
+            attached_tokens.append(span_context_token)
 
         _set_span_attribute(span, SpanAttributes.TRACELOOP_WORKFLOW_NAME, workflow_name)
         _set_span_attribute(span, SpanAttributes.TRACELOOP_ENTITY_PATH, entity_path)
@@ -296,7 +327,8 @@ class TraceloopCallbackHandler(BaseCallbackHandler):
                 )
 
         self.spans[run_id] = SpanHolder(
-            span, token, None, [], workflow_name, entity_name, entity_path
+            span, span_context_token, None, [], workflow_name, entity_name, entity_path,
+            tokens=attached_tokens,
         )
 
         if parent_run_id is not None and parent_run_id in self.spans:
@@ -362,17 +394,29 @@ class TraceloopCallbackHandler(BaseCallbackHandler):
 
         # we already have an LLM span by this point,
         # so skip any downstream instrumentation from here
+        #
+        # ST-10 review-round-2 fix (2026-05-11): APPEND the suppression
+        # token to the existing SpanHolder.tokens list rather than
+        # replacing the SpanHolder. The pre-fix code created a new
+        # SpanHolder with ONLY the suppression token, dropping the
+        # span-context token that was attached by ``_create_span()`` —
+        # so ``_end_span()`` only detached the suppression token and
+        # the LLM span stayed "current" in OTel context indefinitely.
+        # See SpanHolder.tokens for rationale.
+        suppression_token: Optional[Any] = None
         try:
-            token = context_api.attach(
+            suppression_token = context_api.attach(
                 context_api.set_value(SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY, True)
             )
         except Exception:
             # If context setting fails, continue without suppression token
-            token = None
+            suppression_token = None
 
-        self.spans[run_id] = SpanHolder(
-            span, token, None, [], workflow_name, None, entity_path
-        )
+        if suppression_token is not None:
+            # ``_create_span`` already put a SpanHolder at
+            # ``self.spans[run_id]`` with the span-context (and
+            # optionally metadata) tokens — append, do NOT replace.
+            self.spans[run_id].tokens.append(suppression_token)
 
         return span
 
@@ -460,6 +504,16 @@ class TraceloopCallbackHandler(BaseCallbackHandler):
 
         self._end_span(span, run_id)
         if parent_run_id is None:
+            # ST-10 review-round-2 note (2026-05-11): pre-existing leak —
+            # this attach is not paired with a detach. It writes
+            # SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY=False to a new
+            # context layer that grows the OTel context stack by one
+            # frame per chain-end. The pre-existing behaviour is
+            # preserved here because legacy LLMChain paths may depend on
+            # it; it's NOT the trace-id-leak root cause (the trace-id
+            # leak was caused by the LLM-span context-token loss in
+            # ``_create_llm_span`` / ``_end_span``, fixed above). Tracked
+            # as a follow-up for upstream Traceloop cleanup.
             try:
                 context_api.attach(
                     context_api.set_value(

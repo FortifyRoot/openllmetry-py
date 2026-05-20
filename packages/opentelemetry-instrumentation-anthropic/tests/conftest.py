@@ -24,9 +24,39 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 pytest_plugins = []
 
 
+class _NoFortifyRootSpanExporter(InMemorySpanExporter):
+    """ST-10.4 (2026-05-17): filter out any span whose name starts
+    with ``fortifyroot.`` from the upstream-test span exporter.
+
+    ST-10.4 added per-attempt ``fortifyroot.anthropic.retry_attempt``
+    sibling spans under every anthropic logical call (once the
+    Anthropic ``_wrap`` started using ``trace.use_span`` so the retry
+    handler can find the parent span). Upstream / legacy Anthropic
+    tests assert exact span-name lists (e.g.
+    ``all(span.name == "anthropic.chat" for span in spans)``); without
+    a filter, every such assertion would now fail because the
+    retry_attempt sibling is also exported.
+
+    Mirrors the OpenAI test conftest pattern (added 2026-05-16) and
+    the LangChain CI-hardening pattern (2026-05-15). ST-10.4 unit
+    tests in ``tests/test_retry_attempt_emission.py`` use their own
+    ``fresh_tracer`` fixture (not this one), so they continue to see
+    retry_attempt spans and aren't affected by the filter.
+    """
+
+    def get_finished_spans(self):  # type: ignore[override]
+        # Filter by role rather than name prefix so legitimate
+        # fortifyroot.*.safety / .llm_wrapper / etc. spans remain
+        # visible to tests that inspect them.
+        return tuple(
+            s for s in super().get_finished_spans()
+            if (s.attributes or {}).get("fortifyroot.span.role") != "retry_attempt"
+        )
+
+
 @pytest.fixture(scope="function", name="span_exporter")
 def fixture_span_exporter():
-    exporter = InMemorySpanExporter()
+    exporter = _NoFortifyRootSpanExporter()
     yield exporter
 
 

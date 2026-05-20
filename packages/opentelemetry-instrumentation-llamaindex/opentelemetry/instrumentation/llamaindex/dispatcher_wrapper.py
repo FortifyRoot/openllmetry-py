@@ -152,6 +152,21 @@ STREAMING_END_EVENTS = (
 def instrument_with_dispatcher(tracer: Tracer):
     instrument_llm_safety_wrappers()
     dispatcher = get_dispatcher()
+    # ST-10.3: register the FR retry-attempt handler FIRST, before
+    # OpenLLMetrySpanHandler. Order matters because span handlers
+    # fire in registration order — and our handler reads the
+    # ambient OTel context to decide the parent of the
+    # retry_attempt span. If OpenLLMetrySpanHandler ran first, it
+    # would have already swapped the OTel ambient context to its
+    # per-call SpanHolder span, meaning each retry attempt would
+    # land under a DIFFERENT parent → siblings invariant broken →
+    # RetryDetectorProc grouping fails. Running FR's handler first
+    # preserves the user's enclosing OTel span as the shared parent
+    # for all retry_attempts under one logical retry loop.
+    from opentelemetry.instrumentation.llamaindex.retry_handler import (
+        _FortifyRootRetryHandler,
+    )
+    dispatcher.add_span_handler(_FortifyRootRetryHandler())
     openllmetry_span_handler = OpenLLMetrySpanHandler(tracer)
     dispatcher.add_span_handler(openllmetry_span_handler)
     dispatcher.add_event_handler(OpenLLMetryEventHandler(openllmetry_span_handler))

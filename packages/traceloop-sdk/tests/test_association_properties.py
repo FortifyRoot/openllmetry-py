@@ -5,6 +5,24 @@ from opentelemetry.semconv_ai import SpanAttributes
 from traceloop.sdk import Traceloop
 from traceloop.sdk.decorators import task, workflow
 
+# ST-10.4 (review-driven 2026-05-16): generalized from name-based
+# LangChain-only filter to role-based. Drops every provider's
+# retry_attempt sibling (openai / anthropic / bedrock / langchain /
+# llamaindex / litellm) uniformly. A new provider's retry_attempt
+# automatically participates without touching this helper.
+_FR_SPAN_ROLE_KEY = "fortifyroot.span.role"
+_FR_SPAN_ROLE_RETRY_ATTEMPT = "retry_attempt"
+
+
+def _without_fr_langchain_retry_attempt_spans(spans):
+    # Kept under the original LangChain-only name for callsite stability
+    # in this file. New tests should use a locally-defined role-based
+    # filter (see e.g. test_workflows.py, test_prompt_management.py).
+    return [
+        s for s in spans
+        if (s.attributes or {}).get(_FR_SPAN_ROLE_KEY) != _FR_SPAN_ROLE_RETRY_ATTEMPT
+    ]
+
 
 def test_association_properties(exporter):
     @workflow(name="test_workflow")
@@ -87,7 +105,7 @@ def test_langchain_association_properties(exporter):
         {"metadata": {"user_id": "1234", "session_id": 456}},
     )
 
-    spans = exporter.get_finished_spans()
+    spans = _without_fr_langchain_retry_attempt_spans(exporter.get_finished_spans())
 
     assert [
         "ChatPromptTemplate.task",
@@ -158,7 +176,7 @@ def test_langchain_and_external_association_properties(exporter):
 
     test_workflow_external()
 
-    spans = exporter.get_finished_spans()
+    spans = _without_fr_langchain_retry_attempt_spans(exporter.get_finished_spans())
 
     assert [
         "ChatPromptTemplate.task",

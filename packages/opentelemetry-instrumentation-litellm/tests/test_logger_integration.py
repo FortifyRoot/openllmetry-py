@@ -264,8 +264,11 @@ def test_logger_non_text_content_is_noop():
 # ---------------------------------------------------------------------------
 
 def test_instrumentor_registers_logger_at_position_zero():
-    """_FortifyRootCompletionLogger must be at index 0 after instrument()."""
+    """_FortifyRootCompletionLogger must be at index 0, and (post-ST-10.1)
+    _FortifyRootRetryEmitter must be at index 1, with any pre-existing
+    customer callbacks pushed to index 2+ after instrument()."""
     import litellm
+    from opentelemetry.instrumentation.litellm import _FortifyRootRetryEmitter
     original_callbacks = list(getattr(litellm, "callbacks", []))
     try:
         litellm.callbacks = ["existing_cb"]
@@ -274,10 +277,12 @@ def test_instrumentor_registers_logger_at_position_zero():
              patch("opentelemetry.instrumentation.litellm.unwrap"):
             instrumentor._instrument()
             assert isinstance(litellm.callbacks[0], _FortifyRootCompletionLogger)
-            assert litellm.callbacks[1] == "existing_cb"
+            assert isinstance(litellm.callbacks[1], _FortifyRootRetryEmitter)
+            assert litellm.callbacks[2] == "existing_cb"
             instrumentor._uninstrument()
-            # After uninstrument, FR logger removed.
+            # After uninstrument, BOTH FR callbacks removed.
             assert not any(isinstance(cb, _FortifyRootCompletionLogger) for cb in litellm.callbacks)
+            assert not any(isinstance(cb, _FortifyRootRetryEmitter) for cb in litellm.callbacks)
     finally:
         litellm.callbacks = original_callbacks
 
