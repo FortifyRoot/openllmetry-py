@@ -239,6 +239,7 @@ async def _awrap(
             duration,
             attributes={
                 GenAIAttributes.GEN_AI_PROVIDER_NAME: "Google",
+                GenAIAttributes.GEN_AI_REQUEST_MODEL: llm_model,
                 GenAIAttributes.GEN_AI_RESPONSE_MODEL: llm_model,
             },
         )
@@ -318,6 +319,7 @@ def _wrap(
             duration,
             attributes={
                 GenAIAttributes.GEN_AI_PROVIDER_NAME: "Google",
+                GenAIAttributes.GEN_AI_REQUEST_MODEL: llm_model,
                 GenAIAttributes.GEN_AI_RESPONSE_MODEL: llm_model,
             },
         )

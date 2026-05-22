@@ -262,7 +262,10 @@ class AnthropicStream(ObjectProxy):
     # the duration_histogram conditional, causing metrics to be recorded twice.
     def _handle_completion(self):
         """Handle completion logic"""
-        metric_attributes = shared_metrics_attributes(self._complete_response)
+        metric_attributes = shared_metrics_attributes(
+            self._complete_response,
+            request_model=self._kwargs.get("model"),
+        )
         set_span_attribute(
             self._span,
             GenAIAttributes.GEN_AI_RESPONSE_ID,
@@ -451,7 +454,10 @@ class AnthropicAsyncStream(ObjectProxy):
             return
 
         # This mirrors the logic from abuild_from_streaming_response
-        metric_attributes = shared_metrics_attributes(self._complete_response)
+        metric_attributes = shared_metrics_attributes(
+            self._complete_response,
+            request_model=self._kwargs.get("model"),
+        )
         set_span_attribute(self._span, GenAIAttributes.GEN_AI_RESPONSE_ID, self._complete_response.get("id"))
 
         if self._duration_histogram:

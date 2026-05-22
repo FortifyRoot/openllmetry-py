@@ -188,6 +188,7 @@ def chat_wrapper(
             choice_counter,
             duration_histogram,
             duration,
+            request_kwargs=kwargs,
         )
 
         span.end()
@@ -303,6 +304,7 @@ async def achat_wrapper(
             choice_counter,
             duration_histogram,
             duration,
+            request_kwargs=kwargs,
         )
 
         span.end()
@@ -353,6 +355,7 @@ def _handle_response(
     duration_histogram=None,
     duration=None,
     is_streaming: bool = False,
+    request_kwargs=None,
 ):
     if is_openai_v1():
         response_dict = model_as_dict(response)
@@ -368,6 +371,7 @@ def _handle_response(
         response_dict,
         duration,
         is_streaming,
+        request_kwargs=request_kwargs,
     )
 
     # span attributes
@@ -414,12 +418,14 @@ def _set_chat_metrics(
     response_dict,
     duration,
     is_streaming: bool = False,
+    request_kwargs=None,
 ):
     shared_attributes = metric_shared_attributes(
         response_model=response_dict.get("model") or None,
         operation="chat",
         server_address=_get_openai_base_url(instance),
         is_streaming=is_streaming,
+        request_model=(request_kwargs or {}).get("model"),
     )
 
     # token metrics
@@ -782,6 +788,7 @@ class ChatStream(ObjectProxy):
             operation="chat",
             server_address=_get_openai_base_url(self._instance),
             is_streaming=True,
+            request_model=self._request_kwargs.get("model"),
         )
 
     @dont_throw
@@ -927,6 +934,7 @@ def _build_from_streaming_response(
     start_time=None,
     request_kwargs=None,
 ):
+    request_kwargs = request_kwargs or {}
     complete_response = {"choices": [], "model": "", "id": ""}
     streaming_safety = OpenAIChatStreamingSafety(span, SPAN_NAME)
 
@@ -948,11 +956,15 @@ def _build_from_streaming_response(
 
         yield item_to_yield
 
-    shared_attributes = {
-        GenAIAttributes.GEN_AI_RESPONSE_MODEL: complete_response.get("model") or None,
-        "server.address": _get_openai_base_url(instance),
-        "stream": True,
-    }
+    shared_attributes = metric_shared_attributes(
+        response_model=complete_response.get("model")
+        or request_kwargs.get("model")
+        or None,
+        operation="chat",
+        server_address=_get_openai_base_url(instance),
+        is_streaming=True,
+        request_model=request_kwargs.get("model"),
+    )
 
     _set_streaming_token_metrics(
         request_kwargs, complete_response, span, token_counter, shared_attributes
@@ -999,6 +1011,7 @@ async def _abuild_from_streaming_response(
     start_time=None,
     request_kwargs=None,
 ):
+    request_kwargs = request_kwargs or {}
     complete_response = {"choices": [], "model": "", "id": ""}
     streaming_safety = OpenAIChatStreamingSafety(span, SPAN_NAME)
 
@@ -1020,11 +1033,15 @@ async def _abuild_from_streaming_response(
 
         yield item_to_yield
 
-    shared_attributes = {
-        GenAIAttributes.GEN_AI_RESPONSE_MODEL: complete_response.get("model") or None,
-        "server.address": _get_openai_base_url(instance),
-        "stream": True,
-    }
+    shared_attributes = metric_shared_attributes(
+        response_model=complete_response.get("model")
+        or request_kwargs.get("model")
+        or None,
+        operation="chat",
+        server_address=_get_openai_base_url(instance),
+        is_streaming=True,
+        request_model=request_kwargs.get("model"),
+    )
 
     _set_streaming_token_metrics(
         request_kwargs, complete_response, span, token_counter, shared_attributes

@@ -668,6 +668,7 @@ class TraceloopCallbackHandler(BaseCallbackHandler):
                     attributes={
                         GenAIAttributes.GEN_AI_SYSTEM: vendor,
                         GenAIAttributes.GEN_AI_TOKEN_TYPE: "input",
+                        GenAIAttributes.GEN_AI_REQUEST_MODEL: model_name or "unknown",
                         GenAIAttributes.GEN_AI_RESPONSE_MODEL: model_name or "unknown",
                     },
                 )
@@ -678,6 +679,7 @@ class TraceloopCallbackHandler(BaseCallbackHandler):
                     attributes={
                         GenAIAttributes.GEN_AI_SYSTEM: vendor,
                         GenAIAttributes.GEN_AI_TOKEN_TYPE: "output",
+                        GenAIAttributes.GEN_AI_REQUEST_MODEL: model_name or "unknown",
                         GenAIAttributes.GEN_AI_RESPONSE_MODEL: model_name or "unknown",
                     },
                 )
@@ -698,6 +700,7 @@ class TraceloopCallbackHandler(BaseCallbackHandler):
             duration,
             attributes={
                 GenAIAttributes.GEN_AI_SYSTEM: vendor,
+                GenAIAttributes.GEN_AI_REQUEST_MODEL: model_name or "unknown",
                 GenAIAttributes.GEN_AI_RESPONSE_MODEL: model_name or "unknown",
             },
         )

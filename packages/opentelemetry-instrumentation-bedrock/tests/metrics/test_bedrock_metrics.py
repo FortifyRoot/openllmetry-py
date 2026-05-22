@@ -39,6 +39,10 @@ def test_invoke_model_metrics(test_context, brt):
 
     found_token_metric = False
     found_duration_metric = False
+    expected_request_models = {
+        "amazon.titan-text-express-v1",
+        "titan-text-express-v1",
+    }
 
     for rm in resource_metrics:
         for sm in rm.scope_metrics:
@@ -51,6 +55,10 @@ def test_invoke_model_metrics(test_context, brt):
                             "output",
                             "input",
                         ]
+                        assert (
+                            data_point.attributes[GenAIAttributes.GEN_AI_REQUEST_MODEL]
+                            in expected_request_models
+                        )
                         assert data_point.sum > 0
 
                 if metric.name == Meters.LLM_OPERATION_DURATION:
@@ -60,6 +68,18 @@ def test_invoke_model_metrics(test_context, brt):
                     )
                     assert any(
                         data_point.sum > 0 for data_point in metric.data.data_points
+                    )
+                    model_points = [
+                        data_point
+                        for data_point in metric.data.data_points
+                        if GenAIAttributes.GEN_AI_REQUEST_MODEL
+                        in data_point.attributes
+                    ]
+                    assert model_points
+                    assert all(
+                        data_point.attributes[GenAIAttributes.GEN_AI_REQUEST_MODEL]
+                        in expected_request_models
+                        for data_point in model_points
                     )
 
                 if metric.name in (Meters.LLM_TOKEN_USAGE, Meters.LLM_OPERATION_DURATION):

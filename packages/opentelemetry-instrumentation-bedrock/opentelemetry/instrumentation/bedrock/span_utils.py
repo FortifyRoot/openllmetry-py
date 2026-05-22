@@ -646,6 +646,7 @@ def _metric_shared_attributes(
 ):
     return {
         "vendor": response_vendor,
+        GenAIAttributes.GEN_AI_REQUEST_MODEL: response_model,
         GenAIAttributes.GEN_AI_RESPONSE_MODEL: response_model,
         GenAIAttributes.GEN_AI_SYSTEM: "bedrock",
         "stream": is_streaming,

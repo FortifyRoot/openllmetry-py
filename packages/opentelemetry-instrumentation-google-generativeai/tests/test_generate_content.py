@@ -97,6 +97,10 @@ def test_generate_metrics(metrics_test_context, genai_client):
     # Required attributes (values are intentionally not hard-coded)
     assert GenAIAttributes.GEN_AI_PROVIDER_NAME in duration_dp.attributes
     assert GenAIAttributes.GEN_AI_RESPONSE_MODEL in duration_dp.attributes
+    assert (
+        duration_dp.attributes[GenAIAttributes.GEN_AI_REQUEST_MODEL]
+        == "gemini-2.5-flash"
+    )
 
     # ---- Token metric (only emitted when response includes usage_metadata) ----
     if Meters.LLM_TOKEN_USAGE in metrics:
@@ -120,3 +124,7 @@ def test_generate_metrics(metrics_test_context, genai_client):
             # Required semantic attributes
             assert GenAIAttributes.GEN_AI_PROVIDER_NAME in dp.attributes
             assert GenAIAttributes.GEN_AI_RESPONSE_MODEL in dp.attributes
+            assert (
+                dp.attributes[GenAIAttributes.GEN_AI_REQUEST_MODEL]
+                == "gemini-2.5-flash"
+            )
