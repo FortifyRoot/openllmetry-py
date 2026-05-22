@@ -136,7 +136,7 @@ def _extract_response_data(response):
 
 
 @dont_throw
-async def ashared_metrics_attributes(response):
+async def ashared_metrics_attributes(response, request_model=None):
     import inspect
 
     # If we get a coroutine, await it
@@ -168,15 +168,19 @@ async def ashared_metrics_attributes(response):
 
     common_attributes = Config.get_common_metrics_attributes()
 
-    return {
+    metric_attributes = {
         **common_attributes,
         GenAIAttributes.GEN_AI_SYSTEM: GEN_AI_SYSTEM_ANTHROPIC,
         GenAIAttributes.GEN_AI_RESPONSE_MODEL: model,
     }
+    if request_model:
+        metric_attributes[GenAIAttributes.GEN_AI_REQUEST_MODEL] = request_model
+
+    return metric_attributes
 
 
 @dont_throw
-def shared_metrics_attributes(response):
+def shared_metrics_attributes(response, request_model=None):
     import inspect
 
     # If we get a coroutine, we cannot process it in sync context
@@ -205,11 +209,15 @@ def shared_metrics_attributes(response):
 
     common_attributes = Config.get_common_metrics_attributes()
 
-    return {
+    metric_attributes = {
         **common_attributes,
         GenAIAttributes.GEN_AI_SYSTEM: GEN_AI_SYSTEM_ANTHROPIC,
         GenAIAttributes.GEN_AI_RESPONSE_MODEL: model,
     }
+    if request_model:
+        metric_attributes[GenAIAttributes.GEN_AI_REQUEST_MODEL] = request_model
+
+    return metric_attributes
 
 
 @dont_throw

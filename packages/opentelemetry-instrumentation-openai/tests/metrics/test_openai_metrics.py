@@ -50,6 +50,10 @@ def test_chat_completion_metrics(instrument_legacy, reader, openai_client):
                             "output",
                             "input",
                         ]
+                        assert (
+                            data_point.attributes[GenAIAttributes.GEN_AI_REQUEST_MODEL]
+                            == "gpt-3.5-turbo"
+                        )
                         assert len(data_point.attributes["server.address"]) > 0
                         assert data_point.sum > 0
 
@@ -69,6 +73,11 @@ def test_chat_completion_metrics(instrument_legacy, reader, openai_client):
                     )
                     assert all(
                         len(data_point.attributes["server.address"]) > 0
+                        for data_point in metric.data.data_points
+                    )
+                    assert all(
+                        data_point.attributes[GenAIAttributes.GEN_AI_REQUEST_MODEL]
+                        == "gpt-3.5-turbo"
                         for data_point in metric.data.data_points
                     )
 
@@ -116,6 +125,10 @@ def test_chat_parsed_completion_metrics(instrument_legacy, reader, openai_client
                         metric.name == Meters.LLM_TOKEN_USAGE
                         and model == "gpt-4o-2024-08-06"
                     ):
+                        assert (
+                            data_point.attributes[GenAIAttributes.GEN_AI_REQUEST_MODEL]
+                            == "gpt-4o"
+                        )
                         found_token_metric = True
                     elif (
                         metric.name == Meters.LLM_GENERATION_CHOICES
@@ -126,6 +139,10 @@ def test_chat_parsed_completion_metrics(instrument_legacy, reader, openai_client
                         metric.name == Meters.LLM_OPERATION_DURATION
                         and model == "gpt-4o-2024-08-06"
                     ):
+                        assert (
+                            data_point.attributes[GenAIAttributes.GEN_AI_REQUEST_MODEL]
+                            == "gpt-4o"
+                        )
                         found_duration_metric = True
 
     assert found_token_metric
@@ -176,6 +193,10 @@ def test_chat_streaming_metrics(instrument_legacy, reader, deepseek_client):
                             "output",
                             "input",
                         ]
+                        assert (
+                            data_point.attributes[GenAIAttributes.GEN_AI_REQUEST_MODEL]
+                            == "deepseek-chat"
+                        )
                         assert data_point.sum > 0
 
                 if metric.name == Meters.LLM_GENERATION_CHOICES:
@@ -220,6 +241,16 @@ def test_chat_streaming_metrics(instrument_legacy, reader, deepseek_client):
                     ) in ("gpt-3.5-turbo", "gpt-3.5-turbo-0125", "gpt-4o-2024-08-06", "deepseek-chat")
                     assert data_point.attributes["gen_ai.operation.name"] == "chat"
                     assert data_point.attributes["server.address"] != ""
+                    if metric.name in (
+                        Meters.LLM_TOKEN_USAGE,
+                        Meters.LLM_OPERATION_DURATION,
+                        GenAIMetrics.GEN_AI_SERVER_TIME_TO_FIRST_TOKEN,
+                        Meters.LLM_STREAMING_TIME_TO_GENERATE,
+                    ):
+                        assert (
+                            data_point.attributes[GenAIAttributes.GEN_AI_REQUEST_MODEL]
+                            == "deepseek-chat"
+                        )
 
     assert found_token_metric is True
     assert found_choice_metric is True

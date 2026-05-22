@@ -373,12 +373,16 @@ def _token_type(token_type: str):
 
 
 def metric_shared_attributes(
-    response_model: str, operation: str, server_address: str, is_streaming: bool = False
+    response_model: str,
+    operation: str,
+    server_address: str,
+    is_streaming: bool = False,
+    request_model: str = None,
 ):
     attributes = Config.get_common_metrics_attributes()
     vendor = _get_vendor_from_url(server_address)
 
-    return {
+    metric_attributes = {
         **attributes,
         GenAIAttributes.GEN_AI_SYSTEM: vendor,
         GenAIAttributes.GEN_AI_RESPONSE_MODEL: response_model,
@@ -386,6 +390,10 @@ def metric_shared_attributes(
         "server.address": server_address,
         "stream": is_streaming,
     }
+    if request_model:
+        metric_attributes[GenAIAttributes.GEN_AI_REQUEST_MODEL] = request_model
+
+    return metric_attributes
 
 
 def propagate_trace_context(span, kwargs):

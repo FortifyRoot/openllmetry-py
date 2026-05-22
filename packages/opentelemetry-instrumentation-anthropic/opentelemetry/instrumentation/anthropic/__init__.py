@@ -627,7 +627,9 @@ def _wrap(
             )
     elif response:
         try:
-            metric_attributes = shared_metrics_attributes(response)
+            metric_attributes = shared_metrics_attributes(
+                response, request_model=kwargs.get("model")
+            )
 
             if duration_histogram:
                 duration = time.time() - start_time
@@ -755,7 +757,9 @@ async def _awrap(
             ashared_metrics_attributes,
         )
 
-        metric_attributes = await ashared_metrics_attributes(response)
+        metric_attributes = await ashared_metrics_attributes(
+            response, request_model=kwargs.get("model")
+        )
 
         if duration_histogram:
             duration = time.time() - start_time

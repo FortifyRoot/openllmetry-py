@@ -373,6 +373,7 @@ def set_chat_response_usage(
                     attributes={
                         GenAIAttributes.GEN_AI_SYSTEM: vendor,
                         GenAIAttributes.GEN_AI_TOKEN_TYPE: "input",
+                        GenAIAttributes.GEN_AI_REQUEST_MODEL: model_name,
                         GenAIAttributes.GEN_AI_RESPONSE_MODEL: model_name,
                     },
                 )
@@ -383,6 +384,7 @@ def set_chat_response_usage(
                     attributes={
                         GenAIAttributes.GEN_AI_SYSTEM: vendor,
                         GenAIAttributes.GEN_AI_TOKEN_TYPE: "output",
+                        GenAIAttributes.GEN_AI_REQUEST_MODEL: model_name,
                         GenAIAttributes.GEN_AI_RESPONSE_MODEL: model_name,
                     },
                 )

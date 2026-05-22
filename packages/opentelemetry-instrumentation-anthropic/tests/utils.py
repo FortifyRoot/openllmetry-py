@@ -27,6 +27,10 @@ def verify_metrics(
                             data_point.attributes[GenAIAttributes.GEN_AI_RESPONSE_MODEL]
                             == model_name
                         )
+                        assert (
+                            data_point.attributes[GenAIAttributes.GEN_AI_REQUEST_MODEL]
+                            == model_name
+                        )
                         if not ignore_zero_input_tokens:
                             assert data_point.sum > 0
 
@@ -36,6 +40,10 @@ def verify_metrics(
                         assert data_point.value >= 1
                         assert (
                             data_point.attributes[GenAIAttributes.GEN_AI_RESPONSE_MODEL]
+                            == model_name
+                        )
+                        assert (
+                            data_point.attributes[GenAIAttributes.GEN_AI_REQUEST_MODEL]
                             == model_name
                         )
 
@@ -49,6 +57,12 @@ def verify_metrics(
                     )
                     assert all(
                         data_point.attributes.get(GenAIAttributes.GEN_AI_RESPONSE_MODEL)
+                        == model_name
+                        or data_point.attributes.get("error.type") == "TypeError"
+                        for data_point in metric.data.data_points
+                    )
+                    assert all(
+                        data_point.attributes.get(GenAIAttributes.GEN_AI_REQUEST_MODEL)
                         == model_name
                         or data_point.attributes.get("error.type") == "TypeError"
                         for data_point in metric.data.data_points

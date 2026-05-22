@@ -475,6 +475,7 @@ def set_model_response_attributes(span, response, llm_model, token_histogram):
             attributes={
                 GenAIAttributes.GEN_AI_PROVIDER_NAME: "Google",
                 GenAIAttributes.GEN_AI_TOKEN_TYPE: "input",
+                GenAIAttributes.GEN_AI_REQUEST_MODEL: llm_model,
                 GenAIAttributes.GEN_AI_RESPONSE_MODEL: llm_model,
             }
         )
@@ -483,6 +484,7 @@ def set_model_response_attributes(span, response, llm_model, token_histogram):
                     attributes={
                         GenAIAttributes.GEN_AI_PROVIDER_NAME: "Google",
                         GenAIAttributes.GEN_AI_TOKEN_TYPE: "output",
+                        GenAIAttributes.GEN_AI_REQUEST_MODEL: llm_model,
                         GenAIAttributes.GEN_AI_RESPONSE_MODEL: llm_model,
                     },
                 )
