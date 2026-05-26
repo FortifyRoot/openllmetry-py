@@ -10,12 +10,6 @@ from urllib.parse import urlparse
 
 from colorama import Fore
 from opentelemetry import trace
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
-    OTLPSpanExporter as HTTPExporter,
-)
-from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
-    OTLPSpanExporter as GRPCExporter,
-)
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider, SpanProcessor, ReadableSpan
 from opentelemetry.sdk.trace.sampling import Sampler
@@ -35,6 +29,10 @@ from opentelemetry.instrumentation.threading import ThreadingInstrumentor
 from opentelemetry.semconv_ai import SpanAttributes
 from traceloop.sdk.images.image_uploader import ImageUploader
 from traceloop.sdk.instruments import Instruments
+from traceloop.sdk.exporters.auth_warnings import (
+    FortifyRootGRPCSpanExporter as GRPCExporter,
+    FortifyRootHTTPSpanExporter as HTTPExporter,
+)
 from traceloop.sdk.tracing.content_allow_list import ContentAllowList
 from traceloop.sdk.utils import is_notebook
 from traceloop.sdk.utils.package_check import is_package_installed
