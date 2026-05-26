@@ -1,20 +1,28 @@
 import logging
 from typing import Dict, Optional, Any, cast
+from urllib.parse import urlparse
 
-from opentelemetry.exporter.otlp.proto.grpc._log_exporter import (
-    OTLPLogExporter as GRPCExporter,
-)
-from opentelemetry.exporter.otlp.proto.http._log_exporter import (
-    OTLPLogExporter as HTTPExporter,
-)
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk._logs.export import LogExporter, BatchLogRecordProcessor
 from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
 
 from opentelemetry.instrumentation.logging import LoggingInstrumentor
+from traceloop.sdk.exporters.auth_warnings import (
+    AUTH_WARNING_LOGGER_NAME,
+    FortifyRootGRPCLogExporter as GRPCExporter,
+    FortifyRootHTTPLogExporter as HTTPExporter,
+)
 
 
 _FORTIFYROOT_LOGGING_HANDLER_MARKER = "_fortifyroot_logging_handler"
+_FORTIFYROOT_INTERNAL_EXPORTER_LOGGER_PREFIX = "fortifyroot.sdk.exporters."
+
+
+class _FortifyRootInternalLogFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.name == AUTH_WARNING_LOGGER_NAME:
+            return False
+        return not record.name.startswith(_FORTIFYROOT_INTERNAL_EXPORTER_LOGGER_PREFIX)
 
 
 class LoggerWrapper(object):
@@ -62,10 +70,14 @@ class LoggerWrapper(object):
 
 
 def init_logging_exporter(endpoint: str, headers: Dict[str, str]) -> LogExporter:
-    if "http" in endpoint.lower() or "https" in endpoint.lower():
-        return cast(LogExporter, HTTPExporter(endpoint=f"{endpoint}/v1/logs", headers=headers))
+    trimmed_endpoint = endpoint.strip()
+    if urlparse(trimmed_endpoint).scheme.lower() in {"http", "https"}:
+        base_url = trimmed_endpoint.rstrip("/")
+        if not base_url.endswith("/v1/logs"):
+            base_url = f"{base_url}/v1/logs"
+        return cast(LogExporter, HTTPExporter(endpoint=base_url, headers=headers))
     else:
-        return cast(LogExporter, GRPCExporter(endpoint=endpoint, headers=headers))
+        return cast(LogExporter, GRPCExporter(endpoint=trimmed_endpoint, headers=headers))
 
 
 def init_logging_provider(
@@ -101,6 +113,7 @@ def _attach_root_logging_handler(logging_handler: LoggingHandler) -> None:
             root_logger.removeHandler(handler)
 
     setattr(logging_handler, _FORTIFYROOT_LOGGING_HANDLER_MARKER, True)
+    logging_handler.addFilter(_FortifyRootInternalLogFilter())
     root_logger.addHandler(logging_handler)
 
     # Preserve existing app logging levels/formatters when they are already
@@ -108,4 +121,3 @@ def _attach_root_logging_handler(logging_handler: LoggingHandler) -> None:
     # default of exporting INFO and above.
     if not had_non_fortifyroot_handlers and root_logger.level > logging.INFO:
         root_logger.setLevel(logging.INFO)
-

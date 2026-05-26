@@ -1,12 +1,7 @@
 from collections.abc import Sequence
 from typing import Dict, Optional, Any
+from urllib.parse import urlparse
 
-from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
-    OTLPMetricExporter as GRPCExporter,
-)
-from opentelemetry.exporter.otlp.proto.http.metric_exporter import (
-    OTLPMetricExporter as HTTPExporter,
-)
 from opentelemetry.semconv_ai import Meters
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import (
@@ -17,6 +12,10 @@ from opentelemetry.sdk.metrics.view import View, ExplicitBucketHistogramAggregat
 from opentelemetry.sdk.resources import Resource
 
 from opentelemetry import metrics
+from traceloop.sdk.exporters.auth_warnings import (
+    FortifyRootGRPCMetricExporter as GRPCExporter,
+    FortifyRootHTTPMetricExporter as HTTPExporter,
+)
 
 
 class MetricsWrapper(object):
@@ -59,10 +58,14 @@ class MetricsWrapper(object):
 
 
 def init_metrics_exporter(endpoint: str, headers: Dict[str, str]) -> MetricExporter:
-    if "http" in endpoint.lower() or "https" in endpoint.lower():
-        return HTTPExporter(endpoint=f"{endpoint}/v1/metrics", headers=headers)
+    trimmed_endpoint = endpoint.strip()
+    if urlparse(trimmed_endpoint).scheme.lower() in {"http", "https"}:
+        base_url = trimmed_endpoint.rstrip("/")
+        if not base_url.endswith("/v1/metrics"):
+            base_url = f"{base_url}/v1/metrics"
+        return HTTPExporter(endpoint=base_url, headers=headers)
     else:
-        return GRPCExporter(endpoint=endpoint, headers=headers)
+        return GRPCExporter(endpoint=trimmed_endpoint, headers=headers)
 
 
 def init_metrics_provider(
