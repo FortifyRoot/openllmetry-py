@@ -1,3 +1,7 @@
+# NOTE:
+# This file has been modified by FortifyRoot.
+# Original source: https://github.com/traceloop/openllmetry
+
 import pytest
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate

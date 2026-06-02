@@ -1,3 +1,7 @@
+# NOTE:
+# This file has been modified by FortifyRoot.
+# Original source: https://github.com/traceloop/openllmetry
+
 from llama_index.core.base.llms.types import MessageRole
 from opentelemetry.instrumentation.llamaindex.utils import (
     dont_throw,

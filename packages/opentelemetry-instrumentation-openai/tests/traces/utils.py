@@ -1,3 +1,7 @@
+# NOTE:
+# This file has been modified by FortifyRoot.
+# Original source: https://github.com/traceloop/openllmetry
+
 import httpx
 from opentelemetry.sdk.trace import Span
 from opentelemetry.trace import StatusCode

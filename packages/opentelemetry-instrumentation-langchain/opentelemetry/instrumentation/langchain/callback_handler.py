@@ -1,3 +1,7 @@
+# NOTE:
+# This file has been modified by FortifyRoot.
+# Original source: https://github.com/traceloop/openllmetry
+
 import json
 import time
 from typing import Any, Dict, List, Optional, Type, Union

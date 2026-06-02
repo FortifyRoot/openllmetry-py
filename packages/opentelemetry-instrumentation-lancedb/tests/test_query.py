@@ -1,3 +1,7 @@
+# NOTE:
+# This file has been modified by FortifyRoot.
+# Original source: https://github.com/traceloop/openllmetry
+
 import lancedb
 import pytest
 from opentelemetry.semconv_ai import SpanAttributes

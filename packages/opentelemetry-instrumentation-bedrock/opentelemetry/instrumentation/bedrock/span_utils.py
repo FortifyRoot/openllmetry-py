@@ -1,7 +1,11 @@
+# NOTE:
+# This file has been modified by FortifyRoot.
+# Original source: https://github.com/traceloop/openllmetry
+
 import json
+import logging
 import time
 
-import anthropic
 from opentelemetry.instrumentation.bedrock.config import Config
 from opentelemetry.instrumentation.bedrock.utils import should_send_prompts
 from opentelemetry.semconv._incubating.attributes import (
@@ -325,9 +329,10 @@ def _count_anthropic_tokens(messages: list[str]):
     # Lazy initialization of the Anthropic client
     if anthropic_client is None:
         try:
+            import anthropic
+
             anthropic_client = anthropic.Anthropic()
         except Exception as e:
-            import logging
             logger = logging.getLogger(__name__)
             logger.debug(f"Failed to initialize Anthropic client for token counting: {e}")
             # Return 0 if we can't create the client
@@ -338,7 +343,6 @@ def _count_anthropic_tokens(messages: list[str]):
         for message in messages:
             count += anthropic_client.count_tokens(text=message)
     except Exception as e:
-        import logging
         logger = logging.getLogger(__name__)
         logger.debug(f"Failed to count tokens with Anthropic client: {e}")
         return 0

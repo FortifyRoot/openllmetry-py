@@ -1,3 +1,7 @@
+# NOTE:
+# This file has been modified by FortifyRoot.
+# Original source: https://github.com/traceloop/openllmetry
+
 import pytest
 from openai import OpenAI
 from opentelemetry.semconv._incubating.attributes import (

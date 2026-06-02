@@ -1,3 +1,7 @@
+# NOTE:
+# This file has been modified by FortifyRoot.
+# Original source: https://github.com/traceloop/openllmetry
+
 import copy  # FR: needed for deepcopy fix
 
 from opentelemetry.instrumentation.cohere.event_emitter import emit_response_events
