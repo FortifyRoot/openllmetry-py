@@ -1,3 +1,7 @@
+# NOTE:
+# This file has been modified by FortifyRoot.
+# Original source: https://github.com/traceloop/openllmetry
+
 import logging
 from typing import Dict, Optional, Any, cast
 from urllib.parse import urlparse

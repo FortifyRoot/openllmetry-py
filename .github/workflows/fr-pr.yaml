@@ -41,8 +41,25 @@ jobs:
 
           echo "No hardcoded secrets or credentials detected."
 
-  fr-tests:
+  fr-modification-notices:
     needs: secret-scan
+    name: FR Modification Notice Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Run notice script unit tests
+        run: python3 ./scripts/test-apply-fr-modification-notices.py
+
+      - name: Check modified-file notices
+        run: python3 ./scripts/apply-fr-modification-notices.py --check --base-ref "${{ github.base_ref }}"
+
+  fr-tests:
+    needs: [secret-scan, fr-modification-notices]
     name: FR Tests (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -80,7 +97,7 @@ jobs:
           if-no-files-found: ignore
 
   non-fr-tests:
-    needs: secret-scan
+    needs: [secret-scan, fr-modification-notices]
     name: Non-FR Tests (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 60

@@ -627,8 +627,8 @@ def init_instrumentations(
             print(Fore.RED + f"Warning: {instrument} instrumentation does not exist.")
             print(
                 "Usage:\n"
-                "from traceloop.sdk.instruments import Instruments\n"
-                "Traceloop.init(app_name='...', instruments=set([Instruments.OPENAI]))"
+                "from fortifyroot import Instruments\n"
+                "fortifyroot.init(app_name='...', instruments=set([Instruments.OPENAI]))"
             )
             print(Fore.RESET)
 
@@ -939,15 +939,18 @@ def init_pymysql_instrumentor():
 
 
 def init_bedrock_instrumentor(should_enrich_metrics: bool):
-    if is_package_installed("boto3"):
-        from opentelemetry.instrumentation.bedrock import BedrockInstrumentor
+    try:
+        if is_package_installed("boto3"):
+            from opentelemetry.instrumentation.bedrock import BedrockInstrumentor
 
-        instrumentor = BedrockInstrumentor(
-            enrich_token_usage=should_enrich_metrics,
-        )
-        if not instrumentor.is_instrumented_by_opentelemetry:
-            instrumentor.instrument()
-        return True
+            instrumentor = BedrockInstrumentor(
+                enrich_token_usage=should_enrich_metrics,
+            )
+            if not instrumentor.is_instrumented_by_opentelemetry:
+                instrumentor.instrument()
+            return True
+    except Exception as e:
+        logging.error(f"Error initializing Bedrock instrumentor: {e}")
     return False
 
 

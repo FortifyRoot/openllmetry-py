@@ -1,3 +1,7 @@
+# NOTE:
+# This file has been modified by FortifyRoot.
+# Original source: https://github.com/traceloop/openllmetry
+
 import pytest
 from traceloop.sdk import Traceloop, AssociationProperty
 from traceloop.sdk.decorators import task, workflow

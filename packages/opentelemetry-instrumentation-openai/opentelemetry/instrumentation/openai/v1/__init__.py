@@ -1,3 +1,7 @@
+# NOTE:
+# This file has been modified by FortifyRoot.
+# Original source: https://github.com/traceloop/openllmetry
+
 from typing import Collection
 
 from opentelemetry._logs import get_logger

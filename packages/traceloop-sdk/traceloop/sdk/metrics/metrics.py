@@ -1,3 +1,7 @@
+# NOTE:
+# This file has been modified by FortifyRoot.
+# Original source: https://github.com/traceloop/openllmetry
+
 from collections.abc import Sequence
 from typing import Dict, Optional, Any
 from urllib.parse import urlparse

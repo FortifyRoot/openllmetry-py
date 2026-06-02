@@ -1,3 +1,7 @@
+# NOTE:
+# This file has been modified by FortifyRoot.
+# Original source: https://github.com/traceloop/openllmetry
+
 """OpenTelemetry Google Generative AI API instrumentation"""
 
 import asyncio  # FR: async safety
