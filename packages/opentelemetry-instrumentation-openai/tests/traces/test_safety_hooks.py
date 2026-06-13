@@ -74,6 +74,24 @@ def test_chat_prompt_safety_masks_message_content_without_mutating_input():
     assert spans[0].events[0].attributes["fortifyroot.safety.location"] == SafetyLocation.PROMPT.value
 
 
+def test_chat_prompt_safety_passes_model_metadata():
+    _, tracer = _test_span()
+    contexts = []
+
+    def _handler(context):
+        contexts.append(context)
+        return None
+
+    register_prompt_safety_handler(_handler)
+
+    kwargs = {"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "secret"}]}
+    with tracer.start_as_current_span("openai.chat") as span:
+        _apply_prompt_safety(span, kwargs)
+
+    assert contexts[0].metadata["gen_ai.system"] == "OpenAI"
+    assert contexts[0].metadata["gen_ai.request.model"] == "gpt-4o-mini"
+
+
 @pytest.mark.asyncio
 async def test_chat_prompt_safety_masks_span_prompt_attributes():
     exporter, tracer = _test_span()
@@ -136,3 +154,21 @@ def test_completion_response_safety_masks_choice_text():
     spans = exporter.get_finished_spans()
     assert len(spans[0].events) == 1
     assert spans[0].events[0].attributes["fortifyroot.safety.action"] == "MASK"
+
+
+def test_completion_response_safety_passes_response_model_metadata():
+    _, tracer = _test_span()
+    contexts = []
+
+    def _handler(context):
+        contexts.append(context)
+        return None
+
+    register_completion_safety_handler(_handler)
+
+    response = SimpleNamespace(model="gpt-3.5-turbo-instruct", choices=[SimpleNamespace(text="secret")])
+    with tracer.start_as_current_span("openai.completion") as span:
+        _apply_completion_safety(span, response)
+
+    assert contexts[0].metadata["gen_ai.system"] == "OpenAI"
+    assert contexts[0].metadata["gen_ai.response.model"] == "gpt-3.5-turbo-instruct"

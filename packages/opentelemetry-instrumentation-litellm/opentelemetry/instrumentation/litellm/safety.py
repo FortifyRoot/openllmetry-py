@@ -5,6 +5,7 @@ import logging
 from opentelemetry.instrumentation.fortifyroot import (
     SafetyDecision,
     SafetyLocation,
+    build_safety_metadata,
     clone_value,
     get_object_value,
     run_completion_safety,
@@ -19,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 def apply_prompt_safety(span, args, kwargs, request_type, span_name):
     try:
+        request_model = _get_request_model(args, kwargs, request_type)
         messages, source = _get_messages(args, kwargs)
         if isinstance(messages, list):
             return _apply_messages_prompt_safety(
@@ -29,12 +31,20 @@ def apply_prompt_safety(span, args, kwargs, request_type, span_name):
                 source,
                 request_type,
                 span_name,
+                request_model,
             )
 
         if request_type != LLMRequestTypeValues.COMPLETION.value:
             return args, kwargs
 
-        return _apply_text_prompt_safety(span, args, kwargs, request_type, span_name)
+        return _apply_text_prompt_safety(
+            span,
+            args,
+            kwargs,
+            request_type,
+            span_name,
+            request_model,
+        )
     except Exception:
         logger.warning("safety prompt error", exc_info=True)
         return args, kwargs
@@ -48,6 +58,7 @@ def _apply_messages_prompt_safety(
     source,
     request_type,
     span_name,
+    request_model,
 ):
     updated_messages = messages
     changed = False
@@ -61,6 +72,7 @@ def _apply_messages_prompt_safety(
             request_type=request_type,
             segment_index=index,
             segment_role=get_object_value(message, "role") or "user",
+            request_model=request_model,
         )
         if not content_changed:
             continue
@@ -82,13 +94,14 @@ def _apply_messages_prompt_safety(
     return args, updated_kwargs
 
 
-def _apply_text_prompt_safety(span, args, kwargs, request_type, span_name):
+def _apply_text_prompt_safety(span, args, kwargs, request_type, span_name, request_model):
     prompt, source = _get_prompt(args, kwargs)
     updated_prompt, changed = _mask_text_prompt_value(
         span,
         prompt,
         span_name=span_name,
         request_type=request_type,
+        request_model=request_model,
     )
     if not changed:
         return args, kwargs
@@ -103,7 +116,7 @@ def _apply_text_prompt_safety(span, args, kwargs, request_type, span_name):
     return args, updated_kwargs
 
 
-def _mask_text_prompt_value(span, value, *, span_name, request_type):
+def _mask_text_prompt_value(span, value, *, span_name, request_type, request_model=None):
     if isinstance(value, str):
         return _mask_prompt_text(
             span,
@@ -112,6 +125,7 @@ def _mask_text_prompt_value(span, value, *, span_name, request_type):
             request_type=request_type,
             segment_index=0,
             segment_role="user",
+            request_model=request_model,
         )
 
     if not isinstance(value, list):
@@ -125,6 +139,7 @@ def _mask_text_prompt_value(span, value, *, span_name, request_type):
             span_name=span_name,
             request_type=request_type,
             segment_index=index,
+            request_model=request_model,
         )
         if not changed:
             continue
@@ -143,6 +158,7 @@ def _mask_text_prompt_item(
     request_type,
     segment_index,
     metadata=None,
+    request_model=None,
 ):
     if isinstance(value, str):
         return _mask_prompt_text(
@@ -153,6 +169,7 @@ def _mask_text_prompt_item(
             segment_index=segment_index,
             segment_role="user",
             metadata=metadata,
+            request_model=request_model,
         )
 
     if not isinstance(value, list):
@@ -167,6 +184,7 @@ def _mask_text_prompt_item(
             request_type=request_type,
             segment_index=segment_index,
             metadata={"nested_index": index, **(metadata or {})},
+            request_model=request_model,
         )
         if not changed:
             continue
@@ -205,6 +223,7 @@ def _get_prompt(args, kwargs):
 
 def apply_completion_safety(span, response, request_type, span_name):
     try:
+        response_model = get_object_value(response, "model")
         choices = get_object_value(response, "choices") or []
         for index, choice in enumerate(choices):
             message = get_object_value(choice, "message")
@@ -216,6 +235,7 @@ def apply_completion_safety(span, response, request_type, span_name):
                     span_name=span_name,
                     request_type=request_type,
                     segment_index=index,
+                    response_model=response_model,
                 )
                 if content_changed:
                     set_object_value(message, "content", updated_content)
@@ -232,6 +252,7 @@ def apply_completion_safety(span, response, request_type, span_name):
                 span_name=span_name,
                 request_type=request_type,
                 segment_index=index,
+                response_model=response_model,
             )
             if text_changed:
                 set_object_value(choice, "text", updated_text)
@@ -248,6 +269,15 @@ def _get_messages(args, kwargs):
     return kwargs.get("messages"), "kwargs"
 
 
+def _get_request_model(args, kwargs, request_type):
+    model = kwargs.get("model")
+    if model is not None:
+        return model
+    if request_type == LLMRequestTypeValues.COMPLETION.value:
+        return args[1] if len(args) > 1 else None
+    return args[0] if args else None
+
+
 def _mask_prompt_content(
     span,
     content,
@@ -257,6 +287,7 @@ def _mask_prompt_content(
     segment_index,
     segment_role,
     metadata=None,
+    request_model=None,
 ):
     if isinstance(content, str):
         return _mask_prompt_text(
@@ -267,6 +298,7 @@ def _mask_prompt_content(
             segment_index=segment_index,
             segment_role=segment_role,
             metadata=metadata,
+            request_model=request_model,
         )
 
     if not isinstance(content, list):
@@ -283,6 +315,7 @@ def _mask_prompt_content(
                 segment_index=segment_index,
                 segment_role=segment_role,
                 metadata={"block_index": block_index, **(metadata or {})},
+                request_model=request_model,
             )
             if not changed:
                 continue
@@ -303,6 +336,7 @@ def _mask_prompt_content(
             segment_index=segment_index,
             segment_role=segment_role,
             metadata={"block_index": block_index, **(metadata or {})},
+            request_model=request_model,
         )
         if not changed:
             continue
@@ -321,6 +355,7 @@ def _mask_completion_content(
     request_type,
     segment_index,
     metadata=None,
+    response_model=None,
 ):
     if isinstance(content, str):
         return _mask_completion_text(
@@ -330,6 +365,7 @@ def _mask_completion_content(
             request_type=request_type,
             segment_index=segment_index,
             metadata=metadata,
+            response_model=response_model,
         )
 
     if not isinstance(content, list):
@@ -345,6 +381,7 @@ def _mask_completion_content(
                 request_type=request_type,
                 segment_index=segment_index,
                 metadata={"block_index": block_index, **(metadata or {})},
+                response_model=response_model,
             )
             if not changed:
                 continue
@@ -364,6 +401,7 @@ def _mask_completion_content(
             request_type=request_type,
             segment_index=segment_index,
             metadata={"block_index": block_index, **(metadata or {})},
+            response_model=response_model,
         )
         if not changed:
             continue
@@ -383,7 +421,13 @@ def _mask_prompt_text(
     segment_index,
     segment_role,
     metadata=None,
+    request_model=None,
 ):
+    metadata = build_safety_metadata(
+        metadata,
+        provider=PROVIDER,
+        request_model=request_model,
+    )
     result = run_prompt_safety(
         span=span,
         provider=PROVIDER,
@@ -406,7 +450,13 @@ def _mask_completion_text(
     request_type,
     segment_index,
     metadata=None,
+    response_model=None,
 ):
+    metadata = build_safety_metadata(
+        metadata,
+        provider=PROVIDER,
+        response_model=response_model,
+    )
     result = run_completion_safety(
         span=span,
         provider=PROVIDER,

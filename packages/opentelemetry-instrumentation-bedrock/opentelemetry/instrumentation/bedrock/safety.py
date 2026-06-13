@@ -7,6 +7,7 @@ from io import BytesIO
 from opentelemetry.instrumentation.fortifyroot import (
     SafetyDecision,
     SafetyLocation,
+    build_safety_metadata,
     clone_value,
     get_object_value,
     run_completion_safety,
@@ -24,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 def _apply_invoke_prompt_safety(span, kwargs, span_name):
     try:
+        request_model = kwargs.get("modelId")
         payload, as_bytes = _decode_payload(kwargs.get("body"))
         if payload is None:
             return kwargs
@@ -34,6 +36,7 @@ def _apply_invoke_prompt_safety(span, kwargs, span_name):
             span_name=span_name,
             request_type=_request_type(span_name),
             segment_index=0,
+            request_model=request_model,
         )
         if not changed:
             return kwargs
@@ -48,6 +51,7 @@ def _apply_invoke_prompt_safety(span, kwargs, span_name):
 
 def _apply_converse_prompt_safety(span, kwargs, span_name):
     try:
+        request_model = get_object_value(kwargs, "modelId")
         mutated_kwargs = kwargs
 
         system_messages = get_object_value(kwargs, "system")
@@ -64,6 +68,7 @@ def _apply_converse_prompt_safety(span, kwargs, span_name):
                     request_type=LLMRequestTypeValues.CHAT.value,
                     segment_index=index,
                     segment_role="system",
+                    request_model=request_model,
                 )
                 if not changed:
                     continue
@@ -88,6 +93,7 @@ def _apply_converse_prompt_safety(span, kwargs, span_name):
                 request_type=LLMRequestTypeValues.CHAT.value,
                 segment_index=index,
                 segment_role=get_object_value(message, "role") or "user",
+                request_model=request_model,
             )
             if not changed:
                 continue
@@ -103,7 +109,7 @@ def _apply_converse_prompt_safety(span, kwargs, span_name):
         return kwargs
 
 
-def _apply_invoke_completion_safety(span, raw_response, span_name):
+def _apply_invoke_completion_safety(span, raw_response, span_name, *, response_model=None):
     try:
         payload, as_bytes = _decode_payload(raw_response)
         if payload is None:
@@ -115,6 +121,7 @@ def _apply_invoke_completion_safety(span, raw_response, span_name):
             span_name=span_name,
             request_type=_request_type(span_name),
             segment_index=0,
+            response_model=response_model,
         )
         if not changed:
             return raw_response, False
@@ -124,7 +131,7 @@ def _apply_invoke_completion_safety(span, raw_response, span_name):
         return raw_response, False
 
 
-def _prepare_invoke_response(span, response, span_name):
+def _prepare_invoke_response(span, response, span_name, *, response_model=None):
     body = response.get("body")
     if body is None:
         return None
@@ -132,7 +139,7 @@ def _prepare_invoke_response(span, response, span_name):
     response["body"] = ReusableStreamingBody(body._raw_stream, body._content_length)
     raw_response = response["body"].read()
     masked_response, changed = _apply_invoke_completion_safety(
-        span, raw_response, span_name
+        span, raw_response, span_name, response_model=response_model
     )
     if changed:
         raw_response = masked_response
@@ -140,7 +147,7 @@ def _prepare_invoke_response(span, response, span_name):
     return json.loads(raw_response)
 
 
-def _apply_converse_completion_safety(span, response, span_name):
+def _apply_converse_completion_safety(span, response, span_name, *, response_model=None):
     try:
         output = get_object_value(response, "output")
         if output is None:
@@ -154,6 +161,7 @@ def _apply_converse_completion_safety(span, response, span_name):
             span_name=span_name,
             request_type=LLMRequestTypeValues.CHAT.value,
             segment_index=0,
+            response_model=response_model,
         )
         if changed:
             updated_message = clone_value(message)
@@ -165,7 +173,7 @@ def _apply_converse_completion_safety(span, response, span_name):
         return
 
 
-def _mask_prompt_payload(span, value, *, span_name, request_type, segment_index):
+def _mask_prompt_payload(span, value, *, span_name, request_type, segment_index, request_model=None):
     if isinstance(value, dict):
         updated = value
         for key, item in value.items():
@@ -177,6 +185,7 @@ def _mask_prompt_payload(span, value, *, span_name, request_type, segment_index)
                     request_type=request_type,
                     segment_index=segment_index,
                     segment_role="user",
+                    request_model=request_model,
                 )
             elif key in {"messages", "content"}:
                 updated_item, changed = _mask_prompt_content(
@@ -186,6 +195,7 @@ def _mask_prompt_payload(span, value, *, span_name, request_type, segment_index)
                     request_type=request_type,
                     segment_index=segment_index,
                     segment_role="user",
+                    request_model=request_model,
                 )
             else:
                 updated_item, changed = _mask_prompt_payload(
@@ -194,6 +204,7 @@ def _mask_prompt_payload(span, value, *, span_name, request_type, segment_index)
                     span_name=span_name,
                     request_type=request_type,
                     segment_index=segment_index,
+                    request_model=request_model,
                 )
             if not changed:
                 continue
@@ -211,6 +222,7 @@ def _mask_prompt_payload(span, value, *, span_name, request_type, segment_index)
                 span_name=span_name,
                 request_type=request_type,
                 segment_index=index,
+                request_model=request_model,
             )
             if not changed:
                 continue
@@ -222,7 +234,15 @@ def _mask_prompt_payload(span, value, *, span_name, request_type, segment_index)
     return value, False
 
 
-def _mask_completion_payload(span, value, *, span_name, request_type, segment_index):
+def _mask_completion_payload(
+    span,
+    value,
+    *,
+    span_name,
+    request_type,
+    segment_index,
+    response_model=None,
+):
     if isinstance(value, dict):
         updated = value
         for key, item in value.items():
@@ -233,6 +253,7 @@ def _mask_completion_payload(span, value, *, span_name, request_type, segment_in
                     span_name=span_name,
                     request_type=request_type,
                     segment_index=segment_index,
+                    response_model=response_model,
                 )
             elif key in {"content", "completions", "generations"}:
                 updated_item, changed = _mask_completion_content(
@@ -241,6 +262,7 @@ def _mask_completion_payload(span, value, *, span_name, request_type, segment_in
                     span_name=span_name,
                     request_type=request_type,
                     segment_index=segment_index,
+                    response_model=response_model,
                 )
             else:
                 updated_item, changed = _mask_completion_payload(
@@ -249,6 +271,7 @@ def _mask_completion_payload(span, value, *, span_name, request_type, segment_in
                     span_name=span_name,
                     request_type=request_type,
                     segment_index=segment_index,
+                    response_model=response_model,
                 )
             if not changed:
                 continue
@@ -266,6 +289,7 @@ def _mask_completion_payload(span, value, *, span_name, request_type, segment_in
                 span_name=span_name,
                 request_type=request_type,
                 segment_index=index,
+                response_model=response_model,
             )
             if not changed:
                 continue
@@ -285,6 +309,7 @@ def _mask_prompt_content(
     request_type,
     segment_index,
     segment_role,
+    request_model=None,
 ):
     if isinstance(content, str):
         return _mask_prompt_text(
@@ -294,6 +319,7 @@ def _mask_prompt_content(
             request_type=request_type,
             segment_index=segment_index,
             segment_role=segment_role,
+            request_model=request_model,
         )
 
     if not isinstance(content, list):
@@ -310,6 +336,7 @@ def _mask_prompt_content(
                 request_type=request_type,
                 segment_index=segment_index,
                 segment_role=segment_role,
+                request_model=request_model,
             )
             if not changed:
                 continue
@@ -324,6 +351,7 @@ def _mask_prompt_content(
             span_name=span_name,
             request_type=request_type,
             segment_index=index,
+            request_model=request_model,
         )
         if not changed:
             continue
@@ -334,7 +362,15 @@ def _mask_prompt_content(
     return updated, updated is not content
 
 
-def _mask_completion_content(span, content, *, span_name, request_type, segment_index):
+def _mask_completion_content(
+    span,
+    content,
+    *,
+    span_name,
+    request_type,
+    segment_index,
+    response_model=None,
+):
     if isinstance(content, str):
         return _mask_completion_text(
             span,
@@ -342,6 +378,7 @@ def _mask_completion_content(span, content, *, span_name, request_type, segment_
             span_name=span_name,
             request_type=request_type,
             segment_index=segment_index,
+            response_model=response_model,
         )
 
     if not isinstance(content, list):
@@ -357,6 +394,7 @@ def _mask_completion_content(span, content, *, span_name, request_type, segment_
                 span_name=span_name,
                 request_type=request_type,
                 segment_index=segment_index,
+                response_model=response_model,
             )
             if not changed:
                 continue
@@ -371,6 +409,7 @@ def _mask_completion_content(span, content, *, span_name, request_type, segment_
             span_name=span_name,
             request_type=request_type,
             segment_index=index,
+            response_model=response_model,
         )
         if not changed:
             continue
@@ -389,7 +428,12 @@ def _mask_prompt_text(
     request_type,
     segment_index,
     segment_role,
+    request_model=None,
 ):
+    metadata = build_safety_metadata(
+        provider=PROVIDER,
+        request_model=request_model,
+    )
     result = run_prompt_safety(
         span=span,
         provider=PROVIDER,
@@ -399,11 +443,24 @@ def _mask_prompt_text(
         request_type=request_type,
         segment_index=segment_index,
         segment_role=segment_role,
+        metadata=metadata,
     )
     return _resolve_masked_text(text, result)
 
 
-def _mask_completion_text(span, text, *, span_name, request_type, segment_index):
+def _mask_completion_text(
+    span,
+    text,
+    *,
+    span_name,
+    request_type,
+    segment_index,
+    response_model=None,
+):
+    metadata = build_safety_metadata(
+        provider=PROVIDER,
+        response_model=response_model,
+    )
     result = run_completion_safety(
         span=span,
         provider=PROVIDER,
@@ -413,6 +470,7 @@ def _mask_completion_text(span, text, *, span_name, request_type, segment_index)
         request_type=request_type,
         segment_index=segment_index,
         segment_role="assistant",
+        metadata=metadata,
     )
     return _resolve_masked_text(text, result)
 

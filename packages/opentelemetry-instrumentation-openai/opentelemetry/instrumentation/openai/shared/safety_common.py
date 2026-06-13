@@ -3,6 +3,7 @@ from __future__ import annotations
 from opentelemetry.instrumentation.fortifyroot import (
     SafetyDecision,
     SafetyLocation,
+    build_safety_metadata,
     run_completion_safety,
     run_prompt_safety,
 )
@@ -21,7 +22,13 @@ def mask_prompt_text(
     segment_index,
     segment_role=None,
     metadata=None,
+    request_model=None,
 ):
+    metadata = build_safety_metadata(
+        metadata,
+        provider=CHAT_PROVIDER,
+        request_model=request_model,
+    )
     result = run_prompt_safety(
         span=span,
         provider=CHAT_PROVIDER,
@@ -43,7 +50,15 @@ def mask_completion_text(
     span_name,
     segment_index,
     metadata=None,
+    request_model=None,
+    response_model=None,
 ):
+    metadata = build_safety_metadata(
+        metadata,
+        provider=CHAT_PROVIDER,
+        request_model=request_model,
+        response_model=response_model,
+    )
     result = run_completion_safety(
         span=span,
         provider=CHAT_PROVIDER,

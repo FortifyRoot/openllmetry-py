@@ -79,6 +79,25 @@ def test_prompt_safety_masks_positional_prompt_args():
     assert updated_kwargs == {}
 
 
+def test_prompt_safety_passes_model_metadata():
+    _, tracer = _test_span()
+    contexts = []
+
+    register_prompt_safety_handler(lambda context: contexts.append(context) or None)
+
+    with tracer.start_as_current_span("gemini.generate_content") as span:
+        _apply_prompt_safety(
+            span,
+            ("secret",),
+            {},
+            "gemini.generate_content",
+            request_model="gemini-2.0-flash",
+        )
+
+    assert contexts[0].metadata["gen_ai.system"] == "Google"
+    assert contexts[0].metadata["gen_ai.request.model"] == "gemini-2.0-flash"
+
+
 def test_prompt_safety_masks_span_prompt_attributes():
     exporter, tracer = _test_span()
     register_prompt_safety_handler(
@@ -148,6 +167,25 @@ def test_completion_safety_masks_candidate_parts():
     assert response.candidates[0].content.parts[0].text == "[SECRET.gemini]"
     spans = exporter.get_finished_spans()
     assert len(spans[0].events) == 1
+
+
+def test_completion_safety_passes_model_metadata():
+    _, tracer = _test_span()
+    contexts = []
+
+    register_completion_safety_handler(lambda context: contexts.append(context) or None)
+
+    response = SimpleNamespace(text="secret")
+    with tracer.start_as_current_span("gemini.generate_content") as span:
+        _apply_completion_safety(
+            span,
+            response,
+            "gemini.generate_content",
+            response_model="gemini-2.0-flash",
+        )
+
+    assert contexts[0].metadata["gen_ai.system"] == "Google"
+    assert contexts[0].metadata["gen_ai.response.model"] == "gemini-2.0-flash"
 
 
 class _FakeStreamSession:

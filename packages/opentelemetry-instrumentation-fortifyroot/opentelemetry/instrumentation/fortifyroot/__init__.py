@@ -1,11 +1,15 @@
 from opentelemetry.instrumentation.fortifyroot.safety import (
     HANDLER_LOCK,
     SAFETY_EVENT_NAME,
+    GEN_AI_REQUEST_MODEL,
+    GEN_AI_RESPONSE_MODEL,
+    GEN_AI_SYSTEM,
     SafetyContext,
     SafetyDecision,
     SafetyFinding,
     SafetyLocation,
     SafetyResult,
+    build_safety_metadata,
     clear_safety_handlers,
     clone_value,
     discard_deferred_findings,
@@ -56,6 +60,9 @@ from opentelemetry.instrumentation.fortifyroot.streaming import (
 
 __all__ = [
     "SAFETY_EVENT_NAME",
+    "GEN_AI_REQUEST_MODEL",
+    "GEN_AI_RESPONSE_MODEL",
+    "GEN_AI_SYSTEM",
     "HANDLER_LOCK",
     "clear_framework_attempts_for_thread",
     "clear_attempt_counters_for_test",
@@ -75,6 +82,7 @@ __all__ = [
     "SafetyFinding",
     "SafetyLocation",
     "SafetyResult",
+    "build_safety_metadata",
     "clear_safety_handlers",
     "clear_completion_safety_stream_factory",
     "clone_value",

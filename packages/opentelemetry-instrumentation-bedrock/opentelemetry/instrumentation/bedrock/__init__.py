@@ -364,12 +364,17 @@ def _handle_stream_call(span, kwargs, response, metric_params, event_logger):
 @dont_throw
 def _handle_call(span: Span, kwargs, response, metric_params, event_logger):
     request_body = json.loads(kwargs.get("body"))
-    response_body = _prepare_invoke_response(span, response, _BEDROCK_INVOKE_SPAN_NAME)
+    (provider, model_vendor, model) = _get_vendor_model(kwargs.get("modelId"))
+    response_body = _prepare_invoke_response(
+        span,
+        response,
+        _BEDROCK_INVOKE_SPAN_NAME,
+        response_model=model,
+    )
     headers = {}
     if "ResponseMetadata" in response:
         headers = response.get("ResponseMetadata").get("HTTPHeaders", {})
 
-    (provider, model_vendor, model) = _get_vendor_model(kwargs.get("modelId"))
     metric_params.vendor = provider
     metric_params.model = model
     metric_params.is_stream = False
@@ -400,8 +405,13 @@ def _handle_call(span: Span, kwargs, response, metric_params, event_logger):
 
 @dont_throw
 def _handle_converse(span, kwargs, response, metric_params, event_logger):
-    _apply_converse_completion_safety(span, response, _BEDROCK_CONVERSE_SPAN_NAME)
     (provider, model_vendor, model) = _get_vendor_model(kwargs.get("modelId"))
+    _apply_converse_completion_safety(
+        span,
+        response,
+        _BEDROCK_CONVERSE_SPAN_NAME,
+        response_model=model,
+    )
     guardrail_converse(span, response, provider, model, metric_params)
 
     set_converse_model_span_attributes(span, provider, model, kwargs)

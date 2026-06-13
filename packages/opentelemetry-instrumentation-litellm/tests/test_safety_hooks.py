@@ -165,6 +165,39 @@ def test_sync_completion_masks_prompt_and_sets_span_attributes():
     assert span.attributes["fortifyroot.span.role"] == "safety_wrapper"
 
 
+def test_prompt_and_completion_safety_pass_model_metadata():
+    _, tracer = _test_tracer()
+    prompt_contexts = []
+    completion_contexts = []
+
+    register_prompt_safety_handler(
+        lambda context: prompt_contexts.append(context) or None
+    )
+    register_completion_safety_handler(
+        lambda context: completion_contexts.append(context) or None
+    )
+
+    with tracer.start_as_current_span("litellm.completion") as span:
+        apply_prompt_safety(
+            span,
+            (),
+            {"model": "openrouter/anthropic/claude-3", "messages": [{"role": "user", "content": "secret"}]},
+            "chat",
+            "litellm.completion",
+        )
+        apply_completion_safety(
+            span,
+            SimpleNamespace(model="anthropic/claude-3", choices=[SimpleNamespace(text="secret")]),
+            "chat",
+            "litellm.completion",
+        )
+
+    assert prompt_contexts[0].metadata["gen_ai.system"] == "LiteLLM"
+    assert prompt_contexts[0].metadata["gen_ai.request.model"] == "openrouter/anthropic/claude-3"
+    assert completion_contexts[0].metadata["gen_ai.system"] == "LiteLLM"
+    assert completion_contexts[0].metadata["gen_ai.response.model"] == "anthropic/claude-3"
+
+
 def test_sync_text_completion_masks_text_choices():
     exporter, tracer = _test_tracer()
     register_prompt_safety_handler(
