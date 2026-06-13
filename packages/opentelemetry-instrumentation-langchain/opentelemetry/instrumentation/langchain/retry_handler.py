@@ -11,14 +11,18 @@ phase_st10_retryloop.txt):
     retries (e.g. ``ChatOpenAI(max_retries=N)``) fire callbacks
     once per logical call → §4.4.2 coverage limitation applies.
   - Use ``run_id`` as the per-attempt correlation key.
-  - Emit ``fortifyroot.langchain.retry_attempt`` sibling spans
+  - Emit ``fortifyroot.langchain.attempt_<N>`` sibling spans
     under the parent_run_id's span (NOT under the per-LLM
     Traceloop span — siblings need to share a parent for
     RetryDetectorProc's grouping to work).
   - §4.7.1: register/unregister framework-attempt tokens so
     direct-SDK wrappers (ST-10.4) suppress their own emission.
-  - §4.5: set has_retry_attempt_child=true on the parent AFTER
-    the first qualifying retry_attempt successfully starts.
+  - §4.5: set has_attempt_child=true on the parent AFTER
+    the first qualifying llm_attempt successfully starts.
+  - Attempt numbering is conservative for LangChain: callbacks expose
+    a workflow parent that can contain multiple unrelated LLM calls, so
+    this handler emits attempt_1 / is_retry=false for each observed LLM
+    call rather than inferring retry ordinals from the shared parent.
 
 This handler is registered ALONGSIDE the existing
 TraceloopCallbackHandler (not as a replacement) — it captures
@@ -26,7 +30,7 @@ metadata only (model, tokens, status), so its placement is not
 safety-critical. The existing handler continues to do prompt /
 completion attribute capture; the §4.5 backend dedup correctly
 skips its per-attempt spans because they're non-retry siblings of
-the retry_attempts emitted here.
+the llm_attempts emitted here.
 """
 
 from __future__ import annotations
@@ -41,6 +45,9 @@ from uuid import UUID
 from langchain_core.callbacks import BaseCallbackHandler
 from opentelemetry import trace
 from opentelemetry.instrumentation.fortifyroot import (
+    FR_HAS_ATTEMPT_CHILD_KEY,
+    first_llm_attempt,
+    llm_attempt_attributes,
     register_framework_attempt,
     unregister_framework_attempt,
 )
@@ -58,12 +65,12 @@ from opentelemetry.trace import SpanKind, Status, StatusCode, set_span_in_contex
 logger = logging.getLogger(__name__)
 
 # ST-10 §4.4: per-attempt sibling span name + role.
-_FR_RETRY_ATTEMPT_SPAN_NAME = "fortifyroot.langchain.retry_attempt"
 _FR_SPAN_ROLE_KEY = "fortifyroot.span.role"
-_FR_SPAN_ROLE_RETRY_ATTEMPT = "retry_attempt"
+_FR_LLM_ATTEMPT_SPAN_NAME_PREFIX = "fortifyroot.langchain"
+_FR_SPAN_ROLE_LLM_ATTEMPT = "llm_attempt"
 
 # ST-10 §4.5 parent marker.
-_FR_HAS_RETRY_ATTEMPT_CHILD_KEY = "fortifyroot.span.has_retry_attempt_child"
+_FR_HAS_ATTEMPT_CHILD_KEY = FR_HAS_ATTEMPT_CHILD_KEY
 
 
 # ----------------------------------------------------------------------
@@ -384,11 +391,14 @@ def _start_retry_attempt(
 
     routed_provider = _resolve_routed_provider(serialized, invocation_params)
     model = _resolve_model(serialized, invocation_params)
+    span_name, attempt_number, is_retry = first_llm_attempt(
+        _FR_LLM_ATTEMPT_SPAN_NAME_PREFIX,
+    )
 
     attrs: dict[str, Any] = {
-        _FR_SPAN_ROLE_KEY: _FR_SPAN_ROLE_RETRY_ATTEMPT,
         "gen_ai.operation.name": "chat",
     }
+    attrs.update(llm_attempt_attributes(attempt_number, is_retry))
     if routed_provider:
         attrs["gen_ai.system"] = routed_provider
     if model:
@@ -398,7 +408,7 @@ def _start_retry_attempt(
     tracer = trace.get_tracer(__name__, __version__)
     parent_ctx = set_span_in_context(parent_span)
     span = tracer.start_span(
-        _FR_RETRY_ATTEMPT_SPAN_NAME,
+        span_name,
         kind=SpanKind.CLIENT,
         attributes=attrs,
         context=parent_ctx,
@@ -437,13 +447,13 @@ def _start_retry_attempt(
             "ended": False,
         }
 
-    # §4.5 marker timing: set AFTER the first qualifying retry_attempt
+    # §4.5 marker timing: set AFTER the first qualifying llm_attempt
     # has successfully started under this parent. Idempotent — setting
     # the attribute twice on the same parent is a no-op.
     try:
-        parent_span.set_attribute(_FR_HAS_RETRY_ATTEMPT_CHILD_KEY, True)
+        parent_span.set_attribute(_FR_HAS_ATTEMPT_CHILD_KEY, True)
     except Exception:
-        logger.debug("failed to set has_retry_attempt_child on parent", exc_info=True)
+        logger.debug("failed to set has_attempt_child on parent", exc_info=True)
 
 
 def _finalize_retry_attempt(
@@ -525,7 +535,7 @@ def _finalize_retry_attempt(
 
 class _FortifyRootRetryHandler(BaseCallbackHandler):
     """LangChain BaseCallbackHandler that emits one
-    fortifyroot.langchain.retry_attempt sibling span per LLM-start
+    fortifyroot.langchain.attempt_<N> sibling span per LLM-start
     callback invocation. Hooks BOTH on_chat_model_start (chat models —
     F1 finding from ST-10.0 C2 POC) AND on_llm_start (legacy
     completion LLMs).
@@ -648,6 +658,6 @@ def _reset_state_for_test() -> None:
 
 __all__ = [
     "_FortifyRootRetryHandler",
-    "_FR_RETRY_ATTEMPT_SPAN_NAME",
-    "_FR_HAS_RETRY_ATTEMPT_CHILD_KEY",
+    "_FR_LLM_ATTEMPT_SPAN_NAME_PREFIX",
+    "_FR_HAS_ATTEMPT_CHILD_KEY",
 ]

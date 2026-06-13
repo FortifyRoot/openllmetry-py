@@ -30,8 +30,8 @@ from opentelemetry import trace
 from opentelemetry.instrumentation.bedrock.retry_handler import (
     _CTX_SPAN_KEY,
     _CTX_TOKEN_KEY,
-    _FR_HAS_RETRY_ATTEMPT_CHILD_KEY,
-    _FR_RETRY_ATTEMPT_SPAN_NAME,
+    _FR_HAS_ATTEMPT_CHILD_KEY,
+    _FR_LLM_ATTEMPT_SPAN_NAME_PREFIX,
     _BEFORE_SEND_PATTERN,
     _RESPONSE_RECEIVED_PATTERN,
     _before_send_hook,
@@ -40,6 +40,7 @@ from opentelemetry.instrumentation.bedrock.retry_handler import (
     uninstall_event_hooks_on_client,
 )
 from opentelemetry.instrumentation.fortifyroot import (
+    clear_attempt_counters_for_test,
     is_framework_owned,
     register_framework_attempt,
     retry_registry,
@@ -74,8 +75,10 @@ def fresh_tracer():
 @pytest.fixture(autouse=True)
 def reset_registry():
     retry_registry._reset_for_test()
+    clear_attempt_counters_for_test()
     yield
     retry_registry._reset_for_test()
+    clear_attempt_counters_for_test()
 
 
 def _make_request(model: str = "anthropic.claude-haiku-4-5",
@@ -98,7 +101,18 @@ def _make_http_response(status_code: int = 200, request_id: str = "amzn-req-1") 
 
 def _retry_spans(exporter: InMemorySpanExporter):
     return [s for s in exporter.get_finished_spans()
-            if s.name == _FR_RETRY_ATTEMPT_SPAN_NAME]
+            if s.name.startswith(f"{_FR_LLM_ATTEMPT_SPAN_NAME_PREFIX}.attempt_")]
+
+
+def _assert_attempt_sequence(spans):
+    by_number = sorted(
+        spans,
+        key=lambda s: int(s.attributes.get("fortifyroot.attempt.number") or -1),
+    )
+    for expected, span in enumerate(by_number, start=1):
+        assert span.name == f"{_FR_LLM_ATTEMPT_SPAN_NAME_PREFIX}.attempt_{expected}"
+        assert span.attributes.get("fortifyroot.attempt.number") == expected
+        assert span.attributes.get("fortifyroot.attempt.is_retry") is (expected > 1)
 
 
 # ---------------------------------------------------------------------------
@@ -124,7 +138,7 @@ def test_install_event_hooks_registers_both_patterns():
     # Each registration uses a stable unique_id so botocore dedups.
     for call in register_calls:
         assert "unique_id" in call.kwargs, "unique_id must be supplied for dedup"
-        assert call.kwargs["unique_id"].startswith("fortifyroot.bedrock.retry_attempt.")
+        assert call.kwargs["unique_id"].startswith("fortifyroot.bedrock.llm_attempt.")
 
 
 def test_uninstall_event_hooks_unregisters_both_patterns():
@@ -182,8 +196,9 @@ def test_single_attempt_emits_one_span_with_marker(fresh_tracer):
     retry_spans = _retry_spans(exporter)
     assert len(retry_spans) == 1
     rs = retry_spans[0]
+    _assert_attempt_sequence(retry_spans)
     assert rs.parent.span_id == parent_exported.context.span_id
-    assert rs.attributes.get("fortifyroot.span.role") == "retry_attempt"
+    assert rs.attributes.get("fortifyroot.span.role") == "llm_attempt"
     assert rs.attributes.get("gen_ai.system") == "AWS"
     assert rs.attributes.get("gen_ai.request.model") == "anthropic.claude-haiku-4-5"
     assert rs.attributes.get("gen_ai.operation.name") == "chat"
@@ -193,7 +208,7 @@ def test_single_attempt_emits_one_span_with_marker(fresh_tracer):
     assert rs.attributes.get("gen_ai.usage.output_tokens") == 7
     assert rs.attributes.get("server.address") == "bedrock-runtime.us-east-1.amazonaws.com"
     assert rs.attributes.get("server.port") == 443
-    assert parent_exported.attributes.get(_FR_HAS_RETRY_ATTEMPT_CHILD_KEY) is True
+    assert parent_exported.attributes.get(_FR_HAS_ATTEMPT_CHILD_KEY) is True
 
 
 # ---------------------------------------------------------------------------
@@ -226,6 +241,7 @@ def test_three_attempts_share_parent(fresh_tracer):
     parent_exported = next(s for s in spans if s.name == "bedrock.converse")
     retry_spans = _retry_spans(exporter)
     assert len(retry_spans) == 3
+    _assert_attempt_sequence(retry_spans)
 
     parent_ids = {s.parent.span_id for s in retry_spans}
     assert parent_ids == {parent_exported.context.span_id}
@@ -289,7 +305,7 @@ def test_marker_NOT_set_when_no_attempts_fire(fresh_tracer):
     parent_exported = next(
         s for s in exporter.get_finished_spans() if s.name == "bedrock.completion"
     )
-    assert _FR_HAS_RETRY_ATTEMPT_CHILD_KEY not in (parent_exported.attributes or {})
+    assert _FR_HAS_ATTEMPT_CHILD_KEY not in (parent_exported.attributes or {})
 
 
 # ---------------------------------------------------------------------------

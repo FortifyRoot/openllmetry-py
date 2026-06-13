@@ -10,7 +10,10 @@ from typing import Collection, Optional
 from opentelemetry import context as context_api
 from opentelemetry import trace
 from opentelemetry.instrumentation.fortifyroot import (
+    FR_HAS_ATTEMPT_CHILD_KEY,
     get_object_value,
+    llm_attempt_attributes,
+    next_llm_attempt,
     register_framework_attempt,
     unregister_framework_attempt,
 )
@@ -58,15 +61,15 @@ _FR_SPAN_ROLE_VALUE = "safety_wrapper"
 # ``buildSafetyWrapperDedupeSet`` cannot observe siblings across batches.
 _FR_HAS_NATIVE_OTEL_CHILD_KEY = "fortifyroot.span.has_native_otel_child"
 
-# ST-10 §4.5: marker on parent set AFTER the first qualifying retry_attempt
+# ST-10 §4.5: marker on parent set AFTER the first qualifying llm_attempt
 # child has started, so the FR backend's LLMUsageExtractor can dedup the
-# parent + non-retry siblings cross-batch (mirrors has_native_otel_child).
-_FR_HAS_RETRY_ATTEMPT_CHILD_KEY = "fortifyroot.span.has_retry_attempt_child"
+# parent + non-attempt siblings cross-batch (mirrors has_native_otel_child).
+_FR_HAS_ATTEMPT_CHILD_KEY = FR_HAS_ATTEMPT_CHILD_KEY
 
 # ST-10 §4.4: per-attempt sibling span emitted by _FortifyRootRetryEmitter
 # under the safety_wrapper parent.
-_FR_RETRY_ATTEMPT_SPAN_NAME = "fortifyroot.litellm.retry_attempt"
-_FR_SPAN_ROLE_RETRY_ATTEMPT = "retry_attempt"
+_FR_LLM_ATTEMPT_SPAN_NAME_PREFIX = "fortifyroot.litellm"
+_FR_SPAN_ROLE_LLM_ATTEMPT = "llm_attempt"
 _FR_COMPLETION_SAFETY_MARKER = "_fortifyroot_completion_safety_applied"
 _FR_COMPLETION_SAFETY_FALLBACK_MARKERS: set[tuple[int, type]] = set()
 _FR_COMPLETION_SAFETY_MARKERS_LOCK = threading.Lock()
@@ -201,7 +204,7 @@ except ImportError:
 # LiteLLM CustomLogger.
 # ----------------------------------------------------------------------
 #
-# The emitter opens one ``fortifyroot.litellm.retry_attempt`` sibling span
+# The emitter opens one ``fortifyroot.litellm.attempt_<N>`` sibling span
 # per attempt-start callback fired by LiteLLM, and ends it on the matching
 # success/failure callback. Per ST-10.0 C1 source-verified findings, this
 # fires per-attempt only on the ``completion_with_retries(num_retries=N)``
@@ -466,11 +469,15 @@ def _start_retry_attempt_span(kwargs, *, is_text_completion: bool = False) -> No
     routed_provider = _resolve_routed_provider(kwargs) or "litellm"
     model = kwargs.get("model")
     operation = "text_completion" if (is_text_completion or kwargs.get("text_completion")) else "chat"
+    span_name, attempt_number, is_retry = next_llm_attempt(
+        parent,
+        _FR_LLM_ATTEMPT_SPAN_NAME_PREFIX,
+    )
     attrs = {
         GenAIAttributes.GEN_AI_SYSTEM: routed_provider,
         GenAIAttributes.GEN_AI_OPERATION_NAME: operation,
-        _FR_SPAN_ROLE_KEY: _FR_SPAN_ROLE_RETRY_ATTEMPT,
     }
+    attrs.update(llm_attempt_attributes(attempt_number, is_retry))
     if model is not None:
         attrs[GenAIAttributes.GEN_AI_REQUEST_MODEL] = str(model)
     server = _server_address(kwargs)
@@ -488,7 +495,7 @@ def _start_retry_attempt_span(kwargs, *, is_text_completion: bool = False) -> No
     # safer for future refactoring).
     parent_ctx = set_span_in_context(parent)
     span = tracer.start_span(
-        _FR_RETRY_ATTEMPT_SPAN_NAME,
+        span_name,
         kind=SpanKind.CLIENT,
         attributes=attrs,
         context=parent_ctx,
@@ -518,18 +525,18 @@ def _start_retry_attempt_span(kwargs, *, is_text_completion: bool = False) -> No
             "ended": False,
         }
 
-    # §4.5 marker timing: set has_retry_attempt_child=true on the
-    # parent ONLY AFTER the first qualifying retry_attempt has
+    # §4.5 marker timing: set has_attempt_child=true on the
+    # parent ONLY AFTER the first qualifying llm_attempt has
     # successfully started. We just succeeded; mark the parent now.
     # Idempotent: setting the attribute twice on the same parent is a
     # no-op (OTel deduplicates).
     try:
-        parent.set_attribute(_FR_HAS_RETRY_ATTEMPT_CHILD_KEY, True)
+        parent.set_attribute(_FR_HAS_ATTEMPT_CHILD_KEY, True)
     except Exception:
         # Some span impls (e.g. a NonRecordingSpan during shutdown)
         # may reject set_attribute. Non-fatal; the in-batch dedup
         # path still fires from the in-batch retry_attempt children.
-        logger.debug("Failed to set has_retry_attempt_child on parent", exc_info=True)
+        logger.debug("Failed to set has_attempt_child on parent", exc_info=True)
 
 
 def _finalize_retry_attempt_span(
@@ -612,7 +619,7 @@ def _finalize_retry_attempt_span(
 
 class _FortifyRootRetryEmitter(_LiteLLMCustomLoggerBase):
     """Second LiteLLM CustomLogger. Emits per-HTTP-attempt sibling
-    spans (``fortifyroot.litellm.retry_attempt``) under the FR
+    spans (``fortifyroot.litellm.attempt_<N>``) under the FR
     safety_wrapper parent.
 
     Registered AFTER ``_FortifyRootCompletionLogger`` in the LiteLLM

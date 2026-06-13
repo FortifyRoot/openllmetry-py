@@ -12,21 +12,18 @@ from opentelemetry.semconv._incubating.attributes import (
 from traceloop.sdk.decorators import workflow, task
 
 
-# ST-10.4: ``fortifyroot.openai.retry_attempt`` (and equivalents for
-# anthropic / bedrock / framework wrappers) lands in this test's
+# ST-10.4: FortifyRoot LLM-attempt spans land in this test's
 # session-scoped exporter ahead of the logical ``openai.chat`` span.
 # Filter by the canonical ``fortifyroot.span.role`` attribute so every
-# provider's retry_attempt is dropped uniformly. See
-# fr-system-tests/docs/development/ai-logs/st_phase_10.txt addendum
-# 2026-05-16 for context.
+# provider is dropped uniformly.
 _FR_SPAN_ROLE_KEY = "fortifyroot.span.role"
-_FR_SPAN_ROLE_RETRY_ATTEMPT = "retry_attempt"
+_FR_SPAN_ROLE_LLM_ATTEMPT = "llm_attempt"
 
 
 def _without_retry_attempt_spans(spans):
     return [
         s for s in spans
-        if (s.attributes or {}).get(_FR_SPAN_ROLE_KEY) != _FR_SPAN_ROLE_RETRY_ATTEMPT
+        if (s.attributes or {}).get(_FR_SPAN_ROLE_KEY) != _FR_SPAN_ROLE_LLM_ATTEMPT
     ]
 
 

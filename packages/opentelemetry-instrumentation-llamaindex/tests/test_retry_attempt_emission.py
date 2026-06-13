@@ -9,8 +9,10 @@ Covers:
   - BaseLLM instance check: dispatcher spans on non-LLM classes
     are ignored.
   - Single-attempt happy path under tenacity-style wrapping.
-  - Multi-attempt retry path: 3 attempts share parent → 3
-    retry_attempt SIBLINGS under one OTel parent.
+  - Multiple outer calls sharing a parent → 3 llm_attempt SIBLINGS
+    under one OTel parent. LlamaIndex numbering is conservative:
+    shared workflow parents can contain unrelated LLM calls, so each
+    emitted span remains attempt_1 / is_retry=false.
   - Marker timing (§4.5).
   - §4.7.1 token registration symmetry.
   - No-parent guard.
@@ -30,9 +32,9 @@ from opentelemetry.instrumentation.fortifyroot import (
 )
 from opentelemetry.instrumentation.llamaindex.retry_handler import (
     _FortifyRootRetryHandler,
-    _FR_HAS_RETRY_ATTEMPT_CHILD_KEY,
+    _FR_HAS_ATTEMPT_CHILD_KEY,
     _FR_RETRY_ATTEMPT_MAP,
-    _FR_RETRY_ATTEMPT_SPAN_NAME,
+    _FR_LLM_ATTEMPT_SPAN_NAME_PREFIX,
     _is_outer_llm_method,
     _OUTER_LLM_METHODS,
     _reset_state_for_test,
@@ -71,6 +73,13 @@ def reset_state():
     yield
     retry_registry._reset_for_test()
     _reset_state_for_test()
+
+
+def _assert_conservative_attempts(spans):
+    for span in spans:
+        assert span.name == f"{_FR_LLM_ATTEMPT_SPAN_NAME_PREFIX}.attempt_1"
+        assert span.attributes.get("fortifyroot.attempt.number") == 1
+        assert span.attributes.get("fortifyroot.attempt.is_retry") is False
 
 
 # ---------------------------------------------------------------------------
@@ -197,12 +206,13 @@ def test_outer_method_emits_inner_method_does_not(fresh_tracer):
 
     retry_spans = [
         s for s in exporter.get_finished_spans()
-        if s.name == _FR_RETRY_ATTEMPT_SPAN_NAME
+        if s.name.startswith(f"{_FR_LLM_ATTEMPT_SPAN_NAME_PREFIX}.attempt_")
     ]
     assert len(retry_spans) == 1, (
         f"F4 de-dup invariant: outer chat() emits ONE retry_attempt; "
         f"inner _chat() must NOT emit. Got {len(retry_spans)} spans."
     )
+    _assert_conservative_attempts(retry_spans)
 
 
 def test_is_outer_llm_method_filter():
@@ -269,11 +279,12 @@ def test_single_attempt_emits_one_retry_attempt(fresh_tracer):
 
     spans = exporter.get_finished_spans()
     parent_exported = next(s for s in spans if s.name == "workflow")
-    retry_span = next(s for s in spans if s.name == _FR_RETRY_ATTEMPT_SPAN_NAME)
+    retry_span = next(s for s in spans if s.name.startswith(f"{_FR_LLM_ATTEMPT_SPAN_NAME_PREFIX}.attempt_"))
+    _assert_conservative_attempts([retry_span])
 
     assert retry_span.parent.span_id == parent_exported.context.span_id
-    assert parent_exported.attributes.get(_FR_HAS_RETRY_ATTEMPT_CHILD_KEY) is True
-    assert retry_span.attributes.get("fortifyroot.span.role") == "retry_attempt"
+    assert parent_exported.attributes.get(_FR_HAS_ATTEMPT_CHILD_KEY) is True
+    assert retry_span.attributes.get("fortifyroot.span.role") == "llm_attempt"
     assert retry_span.attributes.get("gen_ai.request.model") == "gpt-4o-mini"
     assert retry_span.attributes.get("gen_ai.response.id") == "resp-001"
     assert retry_span.attributes.get("gen_ai.usage.input_tokens") == 10
@@ -336,12 +347,13 @@ def test_three_attempts_share_one_otel_parent(fresh_tracer):
 
     spans = exporter.get_finished_spans()
     parent_exported = next(s for s in spans if s.name == "workflow")
-    retry_spans = [s for s in spans if s.name == _FR_RETRY_ATTEMPT_SPAN_NAME]
+    retry_spans = [s for s in spans if s.name.startswith(f"{_FR_LLM_ATTEMPT_SPAN_NAME_PREFIX}.attempt_")]
 
     assert len(retry_spans) == 3, (
         f"3 outer-method spans should produce 3 retry_attempts (inner _chat filtered out); "
         f"got {len(retry_spans)}"
     )
+    _assert_conservative_attempts(retry_spans)
     parent_ids = {s.parent.span_id for s in retry_spans}
     assert parent_ids == {parent_exported.context.span_id}, (
         f"all 3 retry_attempts must be SIBLINGS under one OTel parent; "
@@ -368,14 +380,14 @@ def test_marker_set_AFTER_first_attempt(fresh_tracer):
     instance = _FakeLLM()
 
     parent = tracer.start_span("workflow")
-    assert _FR_HAS_RETRY_ATTEMPT_CHILD_KEY not in dict(parent.attributes or {})
+    assert _FR_HAS_ATTEMPT_CHILD_KEY not in dict(parent.attributes or {})
 
     with trace.use_span(parent, end_on_exit=False):
         handler.new_span(
             id_=_make_id("FakeLLM", "chat"), bound_args=_empty_bound_args(),
             instance=instance,
         )
-    assert dict(parent.attributes or {}).get(_FR_HAS_RETRY_ATTEMPT_CHILD_KEY) is True
+    assert dict(parent.attributes or {}).get(_FR_HAS_ATTEMPT_CHILD_KEY) is True
 
     handler.prepare_to_exit_span(
         id_=_make_id("FakeLLM", "chat"), bound_args=_empty_bound_args(),
@@ -407,7 +419,7 @@ def test_marker_NOT_set_when_inner_only_fires(fresh_tracer):
     parent_exported = next(
         s for s in exporter.get_finished_spans() if s.name == "workflow"
     )
-    assert _FR_HAS_RETRY_ATTEMPT_CHILD_KEY not in (parent_exported.attributes or {})
+    assert _FR_HAS_ATTEMPT_CHILD_KEY not in (parent_exported.attributes or {})
 
 
 # ---------------------------------------------------------------------------
@@ -450,7 +462,7 @@ def test_no_ambient_parent_no_emission(fresh_tracer):
 
     retry_spans = [
         s for s in exporter.get_finished_spans()
-        if s.name == _FR_RETRY_ATTEMPT_SPAN_NAME
+        if s.name.startswith(f"{_FR_LLM_ATTEMPT_SPAN_NAME_PREFIX}.attempt_")
     ]
     assert len(retry_spans) == 0
     assert len(_FR_RETRY_ATTEMPT_MAP) == 0
@@ -482,6 +494,6 @@ def test_double_finalize_is_idempotent(fresh_tracer):
 
     retry_spans = [
         s for s in exporter.get_finished_spans()
-        if s.name == _FR_RETRY_ATTEMPT_SPAN_NAME
+        if s.name.startswith(f"{_FR_LLM_ATTEMPT_SPAN_NAME_PREFIX}.attempt_")
     ]
     assert len(retry_spans) == 1

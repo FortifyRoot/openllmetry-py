@@ -32,7 +32,7 @@ class _NoFortifyRootSpanExporter(InMemorySpanExporter):
     """ST-10.4 (2026-05-17): filter out any span whose name starts
     with ``fortifyroot.`` from the upstream-test span exporter.
 
-    ST-10.4 added per-attempt ``fortifyroot.anthropic.retry_attempt``
+    ST-10.4 added per-attempt ``fortifyroot.anthropic.attempt_1``
     sibling spans under every anthropic logical call (once the
     Anthropic ``_wrap`` started using ``trace.use_span`` so the retry
     handler can find the parent span). Upstream / legacy Anthropic
@@ -54,7 +54,7 @@ class _NoFortifyRootSpanExporter(InMemorySpanExporter):
         # visible to tests that inspect them.
         return tuple(
             s for s in super().get_finished_spans()
-            if (s.attributes or {}).get("fortifyroot.span.role") != "retry_attempt"
+            if (s.attributes or {}).get("fortifyroot.span.role") != "llm_attempt"
         )
 
 

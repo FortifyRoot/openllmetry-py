@@ -9,13 +9,12 @@ from opentelemetry.semconv_ai import SpanAttributes
 from traceloop.sdk import Traceloop
 from traceloop.sdk.decorators import task, workflow
 
-# ST-10.4 (review-driven 2026-05-16): generalized from name-based
-# LangChain-only filter to role-based. Drops every provider's
-# retry_attempt sibling (openai / anthropic / bedrock / langchain /
-# llamaindex / litellm) uniformly. A new provider's retry_attempt
-# automatically participates without touching this helper.
+# ST-10.4 (review-driven 2026-05-16, renamed 2026-06-12): generalized
+# from name-based LangChain-only filter to role-based. Drops every
+# provider's FortifyRoot LLM-attempt sibling (openai / anthropic /
+# bedrock / langchain / llamaindex / litellm) uniformly.
 _FR_SPAN_ROLE_KEY = "fortifyroot.span.role"
-_FR_SPAN_ROLE_RETRY_ATTEMPT = "retry_attempt"
+_FR_SPAN_ROLE_LLM_ATTEMPT = "llm_attempt"
 
 
 def _without_fr_langchain_retry_attempt_spans(spans):
@@ -24,7 +23,7 @@ def _without_fr_langchain_retry_attempt_spans(spans):
     # filter (see e.g. test_workflows.py, test_prompt_management.py).
     return [
         s for s in spans
-        if (s.attributes or {}).get(_FR_SPAN_ROLE_KEY) != _FR_SPAN_ROLE_RETRY_ATTEMPT
+        if (s.attributes or {}).get(_FR_SPAN_ROLE_KEY) != _FR_SPAN_ROLE_LLM_ATTEMPT
     ]
 
 

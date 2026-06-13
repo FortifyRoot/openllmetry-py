@@ -54,7 +54,10 @@ from typing import Any, Optional
 from opentelemetry import context as context_api
 from opentelemetry import trace
 from opentelemetry.instrumentation.fortifyroot import (
+    FR_HAS_ATTEMPT_CHILD_KEY,
     is_framework_owned,
+    llm_attempt_attributes,
+    next_llm_attempt,
 )
 from opentelemetry.instrumentation.openai.version import __version__
 from opentelemetry.instrumentation.utils import unwrap
@@ -66,10 +69,10 @@ logger = logging.getLogger(__name__)
 
 
 # ST-10 §4.4 / §4.5 constants.
-_FR_RETRY_ATTEMPT_SPAN_NAME = "fortifyroot.openai.retry_attempt"
 _FR_SPAN_ROLE_KEY = "fortifyroot.span.role"
-_FR_SPAN_ROLE_RETRY_ATTEMPT = "retry_attempt"
-_FR_HAS_RETRY_ATTEMPT_CHILD_KEY = "fortifyroot.span.has_retry_attempt_child"
+_FR_LLM_ATTEMPT_SPAN_NAME_PREFIX = "fortifyroot.openai"
+_FR_SPAN_ROLE_LLM_ATTEMPT = "llm_attempt"
+_FR_HAS_ATTEMPT_CHILD_KEY = FR_HAS_ATTEMPT_CHILD_KEY
 
 # Package-local context key set by the OpenAI logical-call wrappers
 # (currently `chat_wrappers.chat_wrapper` / `achat_wrapper`) BEFORE
@@ -264,25 +267,29 @@ def _resolve_parent_span() -> Optional["trace.Span"]:
 
 
 def _set_parent_marker(parent_span: "trace.Span") -> None:
-    """§4.5: mark the parent as 'has retry_attempt child' AFTER the
+    """§4.5: mark the parent as 'has llm_attempt child' AFTER the
     first child has successfully started. Idempotent — setting twice
     is a no-op."""
     try:
-        parent_span.set_attribute(_FR_HAS_RETRY_ATTEMPT_CHILD_KEY, True)
+        parent_span.set_attribute(_FR_HAS_ATTEMPT_CHILD_KEY, True)
     except Exception:
-        logger.debug("failed to set has_retry_attempt_child on parent", exc_info=True)
+        logger.debug("failed to set has_attempt_child on parent", exc_info=True)
 
 
 def _start_attempt_span(request: Any, parent_span: "trace.Span") -> "trace.Span":
-    """Open the retry_attempt sibling span under the given parent.
+    """Open the llm_attempt sibling span under the given parent.
     Caller is responsible for adding response attrs + ending it.
     """
     path = _request_path(request)
+    span_name, attempt_number, is_retry = next_llm_attempt(
+        parent_span,
+        _FR_LLM_ATTEMPT_SPAN_NAME_PREFIX,
+    )
     attrs: dict[str, Any] = {
-        _FR_SPAN_ROLE_KEY: _FR_SPAN_ROLE_RETRY_ATTEMPT,
         "gen_ai.system": "openai",
         "gen_ai.operation.name": _operation_for_path(path),
     }
+    attrs.update(llm_attempt_attributes(attempt_number, is_retry))
     model = _resolve_model_from_request(request)
     if model:
         attrs["gen_ai.request.model"] = model
@@ -291,7 +298,7 @@ def _start_attempt_span(request: Any, parent_span: "trace.Span") -> "trace.Span"
     tracer = trace.get_tracer(__name__, __version__, _tracer_provider)
     parent_ctx = trace.set_span_in_context(parent_span)
     span = tracer.start_span(
-        _FR_RETRY_ATTEMPT_SPAN_NAME,
+        span_name,
         kind=SpanKind.CLIENT,
         attributes=attrs,
         context=parent_ctx,
@@ -364,12 +371,12 @@ def _finalize_success(span: "trace.Span", response: Any, *, is_streaming: bool =
             span.set_attribute("error.type", err_type)
             span.set_status(Status(StatusCode.ERROR, f"http {status_code}"))
     except Exception:
-        logger.debug("failed to set response attrs on openai retry_attempt", exc_info=True)
+        logger.debug("failed to set response attrs on openai llm_attempt", exc_info=True)
 
 
 def _extract_usage_from_body(span: "trace.Span", response: Any) -> None:
     """Parse a non-streaming OpenAI response body and copy usage /
-    response id / response model attrs to the retry_attempt span.
+    response id / response model attrs to the llm_attempt span.
 
     All operations are wrapped in try/except — body parsing is
     best-effort. If anything fails (non-JSON body, malformed schema,
@@ -430,12 +437,12 @@ def _finalize_error(span: "trace.Span", error: BaseException) -> None:
             pass
         span.set_status(Status(StatusCode.ERROR, str(error)))
     except Exception:
-        logger.debug("failed to set error attrs on openai retry_attempt", exc_info=True)
+        logger.debug("failed to set error attrs on openai llm_attempt", exc_info=True)
 
 
 def _should_emit_for(request: Any) -> bool:
     """Combine all skip-emission guards into one decision. Returns
-    True iff a retry_attempt span SHOULD be emitted for this request.
+    True iff an llm_attempt span SHOULD be emitted for this request.
     """
     if _is_suppressed():
         return False
@@ -685,7 +692,7 @@ def _is_installed_for_test() -> bool:
 __all__ = [
     "instrument_retry_emitter",
     "uninstrument_retry_emitter",
-    "_FR_RETRY_ATTEMPT_SPAN_NAME",
-    "_FR_HAS_RETRY_ATTEMPT_CHILD_KEY",
+    "_FR_LLM_ATTEMPT_SPAN_NAME_PREFIX",
+    "_FR_HAS_ATTEMPT_CHILD_KEY",
     "_LLM_PATH_SUFFIXES",
 ]

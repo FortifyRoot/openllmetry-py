@@ -23,6 +23,11 @@ phase_st10_retryloop.txt):
   - Use ambient OTel span at first attempt as the parent for
     sibling-grouping (RetryDetectorProc requires retry_attempts to
     be siblings under one parent_span_id).
+  - Attempt numbering is conservative for LlamaIndex: dispatcher hooks
+    expose a broad ambient workflow parent that can contain unrelated LLM
+    calls, so this handler emits attempt_1 / is_retry=false for each
+    observed outer LLM call rather than inferring retry ordinals from the
+    shared parent.
 
 This handler is registered alongside the existing
 ``OpenLLMetrySpanHandler`` — they capture orthogonal data
@@ -42,6 +47,9 @@ from llama_index.core.base.llms.base import BaseLLM
 from llama_index.core.instrumentation.span_handlers.base import BaseSpanHandler
 from opentelemetry import trace
 from opentelemetry.instrumentation.fortifyroot import (
+    FR_HAS_ATTEMPT_CHILD_KEY,
+    first_llm_attempt,
+    llm_attempt_attributes,
     register_framework_attempt,
     unregister_framework_attempt,
 )
@@ -51,12 +59,12 @@ from opentelemetry.trace import SpanKind, Status, StatusCode, set_span_in_contex
 logger = logging.getLogger(__name__)
 
 # ST-10 §4.4: per-attempt sibling span name + role.
-_FR_RETRY_ATTEMPT_SPAN_NAME = "fortifyroot.llamaindex.retry_attempt"
 _FR_SPAN_ROLE_KEY = "fortifyroot.span.role"
-_FR_SPAN_ROLE_RETRY_ATTEMPT = "retry_attempt"
+_FR_LLM_ATTEMPT_SPAN_NAME_PREFIX = "fortifyroot.llamaindex"
+_FR_SPAN_ROLE_LLM_ATTEMPT = "llm_attempt"
 
 # ST-10 §4.5 parent marker.
-_FR_HAS_RETRY_ATTEMPT_CHILD_KEY = "fortifyroot.span.has_retry_attempt_child"
+_FR_HAS_ATTEMPT_CHILD_KEY = FR_HAS_ATTEMPT_CHILD_KEY
 
 # Dispatcher span IDs follow the pattern "ClassName.method-uuid".
 # Capture the method name so we can filter outer (public) calls
@@ -263,10 +271,13 @@ def _start_retry_attempt(id_: str, instance: Any, bound_args: Any = None) -> Non
         elif "predict" in method:
             operation = "chat"  # treat as chat-shaped
 
+    span_name, attempt_number, is_retry = first_llm_attempt(
+        _FR_LLM_ATTEMPT_SPAN_NAME_PREFIX,
+    )
     attrs: dict[str, Any] = {
-        _FR_SPAN_ROLE_KEY: _FR_SPAN_ROLE_RETRY_ATTEMPT,
         "gen_ai.operation.name": operation,
     }
+    attrs.update(llm_attempt_attributes(attempt_number, is_retry))
     if routed_provider:
         attrs["gen_ai.system"] = routed_provider
     if model:
@@ -276,7 +287,7 @@ def _start_retry_attempt(id_: str, instance: Any, bound_args: Any = None) -> Non
     tracer = trace.get_tracer(__name__, __version__)
     parent_ctx = set_span_in_context(parent_span)
     span = tracer.start_span(
-        _FR_RETRY_ATTEMPT_SPAN_NAME,
+        span_name,
         kind=SpanKind.CLIENT,
         attributes=attrs,
         context=parent_ctx,
@@ -316,11 +327,11 @@ def _start_retry_attempt(id_: str, instance: Any, bound_args: Any = None) -> Non
         }
 
     # §4.5 marker timing: set on parent AFTER the first qualifying
-    # retry_attempt has successfully started under it.
+    # llm_attempt has successfully started under it.
     try:
-        parent_span.set_attribute(_FR_HAS_RETRY_ATTEMPT_CHILD_KEY, True)
+        parent_span.set_attribute(_FR_HAS_ATTEMPT_CHILD_KEY, True)
     except Exception:
-        logger.debug("failed to set has_retry_attempt_child on parent", exc_info=True)
+        logger.debug("failed to set has_attempt_child on parent", exc_info=True)
 
 
 def _finalize_retry_attempt(
@@ -392,7 +403,7 @@ def _finalize_retry_attempt(
 
 class _FortifyRootRetryHandler(BaseSpanHandler):
     """LlamaIndex SpanHandler that emits one
-    ``fortifyroot.llamaindex.retry_attempt`` sibling span per OUTER
+    ``fortifyroot.llamaindex.attempt_<N>`` sibling span per OUTER
     public LLM method invocation (chat/achat/complete/acomplete/...).
 
     De-dup vs the inner ``_chat``/``_complete`` spans is enforced by
@@ -482,7 +493,7 @@ def _reset_state_for_test() -> None:
 
 __all__ = [
     "_FortifyRootRetryHandler",
-    "_FR_RETRY_ATTEMPT_SPAN_NAME",
-    "_FR_HAS_RETRY_ATTEMPT_CHILD_KEY",
+    "_FR_LLM_ATTEMPT_SPAN_NAME_PREFIX",
+    "_FR_HAS_ATTEMPT_CHILD_KEY",
     "_OUTER_LLM_METHODS",
 ]

@@ -29,6 +29,17 @@ from opentelemetry.instrumentation.fortifyroot.retry_registry import (
     register_framework_attempt,
     unregister_framework_attempt,
 )
+from opentelemetry.instrumentation.fortifyroot.attempt_naming import (
+    FR_ATTEMPT_IS_RETRY_KEY,
+    FR_ATTEMPT_NUMBER_KEY,
+    FR_HAS_ATTEMPT_CHILD_KEY,
+    FR_SPAN_ROLE_KEY,
+    FR_SPAN_ROLE_LLM_ATTEMPT,
+    clear_attempt_counters_for_test,
+    first_llm_attempt,
+    llm_attempt_attributes,
+    next_llm_attempt,
+)
 from opentelemetry.instrumentation.fortifyroot.text_streaming import (
     CompletionTextStreamGroup,
 )
@@ -47,7 +58,16 @@ __all__ = [
     "SAFETY_EVENT_NAME",
     "HANDLER_LOCK",
     "clear_framework_attempts_for_thread",
+    "clear_attempt_counters_for_test",
+    "FR_ATTEMPT_IS_RETRY_KEY",
+    "FR_ATTEMPT_NUMBER_KEY",
+    "FR_HAS_ATTEMPT_CHILD_KEY",
+    "FR_SPAN_ROLE_KEY",
+    "FR_SPAN_ROLE_LLM_ATTEMPT",
     "is_framework_owned",
+    "first_llm_attempt",
+    "llm_attempt_attributes",
+    "next_llm_attempt",
     "register_framework_attempt",
     "unregister_framework_attempt",
     "SafetyContext",
