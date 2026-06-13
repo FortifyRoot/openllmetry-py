@@ -3,6 +3,7 @@ from __future__ import annotations
 from opentelemetry.instrumentation.fortifyroot import (
     SafetyDecision,
     SafetyLocation,
+    build_safety_metadata,
     clone_value,
     get_object_value,
     run_completion_safety,
@@ -17,6 +18,7 @@ PROVIDER = "Anthropic"
 def _apply_prompt_safety(span, kwargs, span_name: str):
     try:
         request_type = _request_type(span_name)
+        request_model = kwargs.get("model")
         mutated_kwargs = kwargs
 
         prompt = kwargs.get("prompt")
@@ -28,6 +30,7 @@ def _apply_prompt_safety(span, kwargs, span_name: str):
                 request_type=request_type,
                 segment_index=0,
                 segment_role="user",
+                request_model=request_model,
             )
             if changed:
                 mutated_kwargs = dict(kwargs)
@@ -41,6 +44,7 @@ def _apply_prompt_safety(span, kwargs, span_name: str):
             request_type=request_type,
             segment_index=0,
             segment_role="system",
+            request_model=request_model,
         )
         if system_changed:
             if mutated_kwargs is kwargs:
@@ -62,6 +66,7 @@ def _apply_prompt_safety(span, kwargs, span_name: str):
                 request_type=request_type,
                 segment_index=index,
                 segment_role=role,
+                request_model=request_model,
             )
             if not changed:
                 continue
@@ -85,6 +90,7 @@ def _mask_prompt_content(
     request_type,
     segment_index,
     segment_role,
+    request_model=None,
 ):
     if isinstance(content, str):
         return _mask_prompt_text(
@@ -94,6 +100,7 @@ def _mask_prompt_content(
             request_type=request_type,
             segment_index=segment_index,
             segment_role=segment_role,
+            request_model=request_model,
         )
 
     if not isinstance(content, list):
@@ -114,6 +121,7 @@ def _mask_prompt_content(
             segment_index=segment_index,
             segment_role=segment_role,
             metadata={"block_index": block_index},
+            request_model=request_model,
         )
         if not changed:
             continue
@@ -127,6 +135,7 @@ def _mask_prompt_content(
 def _apply_completion_safety(span, response, span_name: str):
     try:
         request_type = _request_type(span_name)
+        response_model = get_object_value(response, "model")
 
         completion = get_object_value(response, "completion")
         if isinstance(completion, str):
@@ -137,6 +146,7 @@ def _apply_completion_safety(span, response, span_name: str):
                 request_type=request_type,
                 segment_index=0,
                 segment_role="assistant",
+                response_model=response_model,
             )
             if changed:
                 set_object_value(response, "completion", updated_completion)
@@ -166,6 +176,7 @@ def _apply_completion_safety(span, response, span_name: str):
                 request_type=request_type,
                 segment_index=index,
                 segment_role=role,
+                response_model=response_model,
             )
             if changed:
                 set_object_value(block, text_key, updated_text)
@@ -182,7 +193,13 @@ def _mask_prompt_text(
     segment_index,
     segment_role,
     metadata=None,
+    request_model=None,
 ):
+    metadata = build_safety_metadata(
+        metadata,
+        provider=PROVIDER,
+        request_model=request_model,
+    )
     result = run_prompt_safety(
         span=span,
         provider=PROVIDER,
@@ -205,7 +222,14 @@ def _mask_completion_text(
     request_type,
     segment_index,
     segment_role,
+    metadata=None,
+    response_model=None,
 ):
+    metadata = build_safety_metadata(
+        metadata,
+        provider=PROVIDER,
+        response_model=response_model,
+    )
     result = run_completion_safety(
         span=span,
         provider=PROVIDER,
@@ -215,6 +239,7 @@ def _mask_completion_text(
         request_type=request_type,
         segment_index=segment_index,
         segment_role=segment_role,
+        metadata=metadata,
     )
     return _resolve_masked_text(text, result)
 

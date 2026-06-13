@@ -52,6 +52,21 @@ def test_apply_prompt_safety_masks_prompt_system_and_messages(monkeypatch):
     assert updated["messages"][0]["content"][0]["text"] == "masked:msg-secret"
 
 
+def test_apply_prompt_safety_passes_model_metadata(monkeypatch):
+    contexts = []
+
+    def _prompt(**kwargs):
+        contexts.append(kwargs)
+        return None
+
+    monkeypatch.setattr(safety, "run_prompt_safety", _prompt)
+    kwargs = {"model": "claude-3-5-sonnet", "messages": [{"role": "user", "content": "secret"}]}
+    safety._apply_prompt_safety(None, kwargs, "anthropic.chat")
+
+    assert contexts[0]["metadata"]["gen_ai.system"] == "Anthropic"
+    assert contexts[0]["metadata"]["gen_ai.request.model"] == "claude-3-5-sonnet"
+
+
 def test_apply_prompt_safety_returns_partial_update_when_messages_missing():
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(safety, "run_prompt_safety", lambda **kwargs: SafetyResult(text=f"masked:{kwargs['text']}", overall_action="MASK"))
@@ -78,6 +93,21 @@ def test_apply_completion_safety_masks_completion_and_content(monkeypatch):
     assert response.completion == "masked:secret"
     assert response.content[0]["text"] == "masked:text-secret"
     assert response.content[1]["thinking"] == "masked:thought-secret"
+
+
+def test_apply_completion_safety_passes_model_metadata(monkeypatch):
+    contexts = []
+
+    def _completion(**kwargs):
+        contexts.append(kwargs)
+        return None
+
+    monkeypatch.setattr(safety, "run_completion_safety", _completion)
+    response = SimpleNamespace(model="claude-3-5-sonnet", completion="secret")
+    safety._apply_completion_safety(None, response, "anthropic.chat")
+
+    assert contexts[0]["metadata"]["gen_ai.system"] == "Anthropic"
+    assert contexts[0]["metadata"]["gen_ai.response.model"] == "claude-3-5-sonnet"
 
 
 def test_anthropic_prompt_and_completion_helpers_cover_noop_branches(monkeypatch):

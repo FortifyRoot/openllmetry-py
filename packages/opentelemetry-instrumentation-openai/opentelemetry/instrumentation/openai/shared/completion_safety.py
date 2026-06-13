@@ -11,6 +11,7 @@ from opentelemetry.instrumentation.fortifyroot import get_object_value, set_obje
 def _apply_prompt_safety(span, kwargs):
     try:
         prompt = kwargs.get("prompt")
+        request_model = kwargs.get("model")
         if isinstance(prompt, str):
             updated_prompt, changed = mask_prompt_text(
                 span,
@@ -18,6 +19,7 @@ def _apply_prompt_safety(span, kwargs):
                 span_name=COMPLETION_SPAN_NAME,
                 segment_index=0,
                 segment_role="user",
+                request_model=request_model,
             )
             if not changed:
                 return kwargs
@@ -38,6 +40,7 @@ def _apply_prompt_safety(span, kwargs):
                 span_name=COMPLETION_SPAN_NAME,
                 segment_index=index,
                 segment_role="user",
+                request_model=request_model,
             )
             if not changed:
                 continue
@@ -55,6 +58,7 @@ def _apply_prompt_safety(span, kwargs):
 
 def _apply_completion_safety(span, response):
     try:
+        response_model = get_object_value(response, "model")
         for index, choice in enumerate(get_object_value(response, "choices", []) or []):
             text = get_object_value(choice, "text")
             if not isinstance(text, str):
@@ -64,6 +68,7 @@ def _apply_completion_safety(span, response):
                 text,
                 span_name=COMPLETION_SPAN_NAME,
                 segment_index=index,
+                response_model=response_model,
             )
             if changed:
                 set_object_value(choice, "text", updated_text)

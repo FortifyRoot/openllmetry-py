@@ -17,6 +17,7 @@ def _apply_prompt_safety(span, kwargs):
         messages = kwargs.get("messages")
         if not isinstance(messages, list):
             return kwargs
+        request_model = kwargs.get("model")
 
         mutated_kwargs = kwargs
         mutated_messages = None
@@ -28,6 +29,7 @@ def _apply_prompt_safety(span, kwargs):
                 content,
                 message_index=index,
                 message_role=role,
+                request_model=request_model,
             )
             if not changed:
                 continue
@@ -41,7 +43,7 @@ def _apply_prompt_safety(span, kwargs):
         return kwargs
 
 
-def _mask_prompt_content(span, content, *, message_index, message_role):
+def _mask_prompt_content(span, content, *, message_index, message_role, request_model=None):
     if isinstance(content, str):
         return mask_prompt_text(
             span,
@@ -49,6 +51,7 @@ def _mask_prompt_content(span, content, *, message_index, message_role):
             span_name=CHAT_SPAN_NAME,
             segment_index=message_index,
             segment_role=message_role,
+            request_model=request_model,
         )
 
     if not isinstance(content, list):
@@ -67,6 +70,7 @@ def _mask_prompt_content(span, content, *, message_index, message_role):
             segment_index=message_index,
             segment_role=message_role,
             metadata={"block_index": block_index},
+            request_model=request_model,
         )
         if not changed:
             continue
@@ -82,6 +86,7 @@ def _apply_completion_safety(span, response):
         choices = getattr(response, "choices", None)
         if not choices:
             return
+        response_model = get_object_value(response, "model")
 
         for choice_index, choice in enumerate(choices):
             message = get_object_value(choice, "message")
@@ -92,6 +97,7 @@ def _apply_completion_safety(span, response):
                 span,
                 content,
                 choice_index=choice_index,
+                response_model=response_model,
             )
             if changed:
                 set_object_value(message, "content", updated_content)
@@ -99,13 +105,14 @@ def _apply_completion_safety(span, response):
         return
 
 
-def _mask_completion_content(span, content, *, choice_index):
+def _mask_completion_content(span, content, *, choice_index, response_model=None):
     if isinstance(content, str):
         return mask_completion_text(
             span,
             content,
             span_name=CHAT_SPAN_NAME,
             segment_index=choice_index,
+            response_model=response_model,
         )
 
     if not isinstance(content, list):
@@ -123,6 +130,7 @@ def _mask_completion_content(span, content, *, choice_index):
             span_name=CHAT_SPAN_NAME,
             segment_index=choice_index,
             metadata={"block_index": block_index},
+            response_model=response_model,
         )
         if not changed:
             continue

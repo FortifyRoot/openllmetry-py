@@ -3,6 +3,7 @@ from __future__ import annotations
 from opentelemetry.instrumentation.fortifyroot import (
     SafetyDecision,
     SafetyLocation,
+    build_safety_metadata,
     clone_value,
     get_object_value,
     run_completion_safety,
@@ -14,7 +15,7 @@ from opentelemetry.semconv_ai import LLMRequestTypeValues
 PROVIDER = "Google"
 
 
-def _apply_prompt_safety(span, args, kwargs, span_name):
+def _apply_prompt_safety(span, args, kwargs, span_name, *, request_model=None):
     try:
         updated_args = args
         updated_kwargs = kwargs
@@ -26,6 +27,7 @@ def _apply_prompt_safety(span, args, kwargs, span_name):
                 span_name=span_name,
                 segment_index=0,
                 segment_role="user",
+                request_model=request_model,
             )
             if changed:
                 updated_args = (masked_arg, *args[1:])
@@ -37,6 +39,7 @@ def _apply_prompt_safety(span, args, kwargs, span_name):
                 span_name=span_name,
                 segment_index=0,
                 segment_role="user",
+                request_model=request_model,
             )
             if changed:
                 updated_kwargs = dict(kwargs)
@@ -47,7 +50,15 @@ def _apply_prompt_safety(span, args, kwargs, span_name):
         return args, kwargs
 
 
-def _mask_prompt_value(span, value, *, span_name, segment_index, segment_role):
+def _mask_prompt_value(
+    span,
+    value,
+    *,
+    span_name,
+    segment_index,
+    segment_role,
+    request_model=None,
+):
     if isinstance(value, str):
         return _mask_prompt_text(
             span,
@@ -55,6 +66,7 @@ def _mask_prompt_value(span, value, *, span_name, segment_index, segment_role):
             span_name=span_name,
             segment_index=segment_index,
             segment_role=segment_role,
+            request_model=request_model,
         )
 
     if isinstance(value, list):
@@ -66,6 +78,7 @@ def _mask_prompt_value(span, value, *, span_name, segment_index, segment_role):
                 span_name=span_name,
                 segment_index=index,
                 segment_role=segment_role,
+                request_model=request_model,
             )
             if not changed:
                 continue
@@ -88,6 +101,7 @@ def _mask_prompt_value(span, value, *, span_name, segment_index, segment_role):
                 segment_index=index,
                 segment_role=segment_role,
                 metadata={"part_index": index},
+                request_model=request_model,
             )
             if not changed:
                 continue
@@ -101,7 +115,7 @@ def _mask_prompt_value(span, value, *, span_name, segment_index, segment_role):
     return value, False
 
 
-def _apply_completion_safety(span, response, span_name):
+def _apply_completion_safety(span, response, span_name, *, response_model=None):
     try:
         text = get_object_value(response, "text")
         if isinstance(text, str):
@@ -110,6 +124,7 @@ def _apply_completion_safety(span, response, span_name):
                 text,
                 span_name=span_name,
                 segment_index=0,
+                response_model=response_model,
             )
             if changed:
                 set_object_value(response, "text", updated_text)
@@ -133,6 +148,7 @@ def _apply_completion_safety(span, response, span_name):
                     span_name=span_name,
                     segment_index=candidate_index,
                     metadata={"part_index": part_index},
+                    response_model=response_model,
                 )
                 if changed:
                     set_object_value(part, "text", updated_part_text)
@@ -148,7 +164,13 @@ def _mask_prompt_text(
     segment_index,
     segment_role,
     metadata=None,
+    request_model=None,
 ):
+    metadata = build_safety_metadata(
+        metadata,
+        provider=PROVIDER,
+        request_model=request_model,
+    )
     result = run_prompt_safety(
         span=span,
         provider=PROVIDER,
@@ -170,7 +192,13 @@ def _mask_completion_text(
     span_name,
     segment_index,
     metadata=None,
+    response_model=None,
 ):
+    metadata = build_safety_metadata(
+        metadata,
+        provider=PROVIDER,
+        response_model=response_model,
+    )
     result = run_completion_safety(
         span=span,
         provider=PROVIDER,

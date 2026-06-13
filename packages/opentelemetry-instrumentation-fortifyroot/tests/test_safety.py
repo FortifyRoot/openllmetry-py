@@ -6,6 +6,7 @@ from opentelemetry.instrumentation.fortifyroot import (
     SafetyFinding,
     SafetyLocation,
     SafetyResult,
+    build_safety_metadata,
     clear_safety_handlers,
     clone_value,
     register_prompt_safety_handler,
@@ -83,6 +84,20 @@ def test_run_prompt_safety_emits_one_event_per_finding():
     assert spans[0].events[1].attributes["fortifyroot.safety.action"] == SafetyDecision.ALLOW.value
 
     clear_safety_handlers()
+
+
+def test_build_safety_metadata_preserves_raw_llm_context_only():
+    assert build_safety_metadata(
+        {"block_index": 1, "gen_ai.system": "OpenRouter"},
+        provider="OpenAI",
+        request_model="openai/gpt-4o-mini",
+        response_model="gpt-4o-mini",
+    ) == {
+        "block_index": 1,
+        "gen_ai.system": "OpenRouter",
+        "gen_ai.request.model": "openai/gpt-4o-mini",
+        "gen_ai.response.model": "gpt-4o-mini",
+    }
 
 
 def test_run_prompt_safety_returns_none_without_handler():

@@ -227,7 +227,14 @@ async def _awrap(
         },
     )
     start_time = time.perf_counter()
-    args, kwargs = await asyncio.to_thread(_apply_prompt_safety, span, args, kwargs, name)  # FR: async safety
+    args, kwargs = await asyncio.to_thread(
+        _apply_prompt_safety,
+        span,
+        args,
+        kwargs,
+        name,
+        request_model=llm_model,
+    )  # FR: async safety
     _handle_request(span, args, kwargs, llm_model, event_logger)
     try:
         response = await wrapped(*args, **kwargs)
@@ -257,7 +264,13 @@ async def _awrap(
                 span, response, llm_model, event_logger, token_histogram
             )
         else:
-            await asyncio.to_thread(_apply_completion_safety, span, response, name)  # FR: async safety
+            await asyncio.to_thread(
+                _apply_completion_safety,
+                span,
+                response,
+                name,
+                response_model=llm_model,
+            )  # FR: async safety
             _handle_response(
                 span, response, llm_model, event_logger, token_histogram
             )
@@ -307,7 +320,7 @@ def _wrap(
     )
 
     start_time = time.perf_counter()
-    args, kwargs = _apply_prompt_safety(span, args, kwargs, name)
+    args, kwargs = _apply_prompt_safety(span, args, kwargs, name, request_model=llm_model)
     _handle_request(span, args, kwargs, llm_model, event_logger)
     try:
         response = wrapped(*args, **kwargs)
@@ -337,7 +350,7 @@ def _wrap(
                 span, response, llm_model, event_logger, token_histogram
             )
         else:
-            _apply_completion_safety(span, response, name)
+            _apply_completion_safety(span, response, name, response_model=llm_model)
             _handle_response(
                 span, response, llm_model, event_logger, token_histogram
             )

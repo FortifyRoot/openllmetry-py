@@ -102,6 +102,24 @@ def test_invoke_prompt_safety_masks_json_body():
     assert json.loads(updated_kwargs["body"])["prompt"] == "[PII.prompt]"
 
 
+def test_invoke_prompt_safety_passes_model_metadata():
+    _, tracer = _test_span()
+    contexts = []
+
+    def _handler(context):
+        contexts.append(context)
+        return None
+
+    register_prompt_safety_handler(_handler)
+
+    kwargs = {"body": json.dumps({"prompt": "secret"}), "modelId": "anthropic.claude-3-sonnet"}
+    with tracer.start_as_current_span("bedrock.completion") as span:
+        _apply_invoke_prompt_safety(span, kwargs, "bedrock.completion")
+
+    assert contexts[0].metadata["gen_ai.system"] == "Bedrock"
+    assert contexts[0].metadata["gen_ai.request.model"] == "anthropic.claude-3-sonnet"
+
+
 def test_converse_prompt_safety_masks_message_content():
     _, tracer = _test_span()
     register_prompt_safety_handler(
@@ -142,6 +160,29 @@ def test_invoke_completion_safety_masks_json_response():
     assert changed is True
     assert json.loads(updated_response)["completion"] == "[SECRET.output]"
     assert len(exporter.get_finished_spans()[0].events) == 1
+
+
+def test_invoke_completion_safety_passes_model_metadata():
+    _, tracer = _test_span()
+    contexts = []
+
+    def _handler(context):
+        contexts.append(context)
+        return None
+
+    register_completion_safety_handler(_handler)
+
+    raw_response = json.dumps({"completion": "secret"})
+    with tracer.start_as_current_span("bedrock.completion") as span:
+        _apply_invoke_completion_safety(
+            span,
+            raw_response,
+            "bedrock.completion",
+            response_model="claude-3-sonnet",
+        )
+
+    assert contexts[0].metadata["gen_ai.system"] == "Bedrock"
+    assert contexts[0].metadata["gen_ai.response.model"] == "claude-3-sonnet"
 
 
 def test_prepare_invoke_response_masks_and_rebuilds_streaming_body():

@@ -12,6 +12,9 @@ from typing import Any
 from opentelemetry.trace import Span
 
 SAFETY_EVENT_NAME = "fortifyroot.safety.violation"
+GEN_AI_SYSTEM = "gen_ai.system"
+GEN_AI_REQUEST_MODEL = "gen_ai.request.model"
+GEN_AI_RESPONSE_MODEL = "gen_ai.response.model"
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +72,35 @@ HANDLER_LOCK = threading.RLock()
 _handler_lock = HANDLER_LOCK
 _prompt_handler: PromptSafetyHandler | None = None
 _completion_handler: CompletionSafetyHandler | None = None
+
+
+def build_safety_metadata(
+    metadata: Mapping[str, Any] | None = None,
+    *,
+    provider: Any | None = None,
+    request_model: Any | None = None,
+    response_model: Any | None = None,
+) -> dict[str, Any]:
+    """Build raw LLM context metadata for safety handlers.
+
+    These are raw semantic-convention attributes. FortifyRoot backend owns
+    canonical provider-role enrichment, so SDK instrumentation should not emit
+    routing_provider or billing_provider directly.
+    """
+
+    attrs = dict(metadata or {})
+    _set_metadata_if_present(attrs, GEN_AI_SYSTEM, provider)
+    _set_metadata_if_present(attrs, GEN_AI_REQUEST_MODEL, request_model)
+    _set_metadata_if_present(attrs, GEN_AI_RESPONSE_MODEL, response_model)
+    return attrs
+
+
+def _set_metadata_if_present(attrs: dict[str, Any], key: str, value: Any | None) -> None:
+    if value is None:
+        return
+    text = str(value).strip()
+    if text:
+        attrs.setdefault(key, text)
 
 
 def register_prompt_safety_handler(handler: PromptSafetyHandler | None) -> None:
