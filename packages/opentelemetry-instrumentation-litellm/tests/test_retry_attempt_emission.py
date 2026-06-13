@@ -4,11 +4,11 @@ Covers:
   - Instrumentor symmetry: _FortifyRootRetryEmitter is registered at
     instrument() AND removed at uninstrument() (Fallback B child-emission
     proof requirement (ii) per RETRY_LOOP.md §4.4.1).
-  - Single-attempt happy path: one retry_attempt span emitted under the
-    safety_wrapper parent, parent carries has_retry_attempt_child=true.
+  - Single-attempt happy path: one llm_attempt span emitted under the
+    safety_wrapper parent, parent carries has_attempt_child=true.
   - Multi-attempt retry path: 3 retry_attempt spans emitted (2 ERROR + 1
     OK) for a 429→429→200 sequence, all under one safety_wrapper.
-  - Marker timing (§4.5): the parent's has_retry_attempt_child marker
+  - Marker timing (§4.5): the parent's has_attempt_child marker
     is set AFTER the first retry_attempt's start, NOT at parent creation.
   - §4.7.1 token registration: framework-attempt tokens are registered
     on attempt-start AND unregistered on attempt-end.
@@ -24,14 +24,17 @@ from typing import Any
 
 import pytest
 from opentelemetry import trace
-from opentelemetry.instrumentation.fortifyroot import retry_registry
+from opentelemetry.instrumentation.fortifyroot import (
+    clear_attempt_counters_for_test,
+    retry_registry,
+)
 from opentelemetry.instrumentation.litellm import (
     LiteLLMInstrumentor,
     _FortifyRootCompletionLogger,
     _FortifyRootRetryEmitter,
-    _FR_HAS_RETRY_ATTEMPT_CHILD_KEY,
+    _FR_HAS_ATTEMPT_CHILD_KEY,
     _FR_RETRY_ATTEMPT_MAP,
-    _FR_RETRY_ATTEMPT_SPAN_NAME,
+    _FR_LLM_ATTEMPT_SPAN_NAME_PREFIX,
     _resolve_routed_provider,
     _start_retry_attempt_span,
     _finalize_retry_attempt_span,
@@ -95,10 +98,23 @@ def fresh_tracer():
 def reset_registry_and_map():
     """Each test starts with empty retry-emitter state."""
     retry_registry._reset_for_test()
+    clear_attempt_counters_for_test()
     _FR_RETRY_ATTEMPT_MAP.clear()
     yield
     retry_registry._reset_for_test()
+    clear_attempt_counters_for_test()
     _FR_RETRY_ATTEMPT_MAP.clear()
+
+
+def _assert_attempt_sequence(spans):
+    by_number = sorted(
+        spans,
+        key=lambda s: int(s.attributes.get("fortifyroot.attempt.number") or -1),
+    )
+    for expected, span in enumerate(by_number, start=1):
+        assert span.name == f"{_FR_LLM_ATTEMPT_SPAN_NAME_PREFIX}.attempt_{expected}"
+        assert span.attributes.get("fortifyroot.attempt.number") == expected
+        assert span.attributes.get("fortifyroot.attempt.is_retry") is (expected > 1)
 
 
 # ---------------------------------------------------------------------------
@@ -205,8 +221,8 @@ def test_single_attempt_emits_one_retry_attempt_under_parent(fresh_tracer):
     directly with an ambient parent span. Verify:
       - exactly 1 retry_attempt span exported
       - retry_attempt's parent is the safety_wrapper
-      - parent has has_retry_attempt_child=true
-      - retry_attempt has fortifyroot.span.role=retry_attempt
+      - parent has has_attempt_child=true
+      - retry_attempt has fortifyroot.span.role=llm_attempt
       - retry_attempt has gen_ai.system, gen_ai.request.model
     """
     tracer, exporter, _ = fresh_tracer
@@ -237,16 +253,17 @@ def test_single_attempt_emits_one_retry_attempt_under_parent(fresh_tracer):
 
     spans = exporter.get_finished_spans()
     span_names = [s.name for s in spans]
-    assert _FR_RETRY_ATTEMPT_SPAN_NAME in span_names, (
+    assert f"{_FR_LLM_ATTEMPT_SPAN_NAME_PREFIX}.attempt_1" in span_names, (
         f"retry_attempt span missing; got {span_names}"
     )
-    retry_span = next(s for s in spans if s.name == _FR_RETRY_ATTEMPT_SPAN_NAME)
+    retry_span = next(s for s in spans if s.name.startswith(f"{_FR_LLM_ATTEMPT_SPAN_NAME_PREFIX}.attempt_"))
     parent_span_exported = next(s for s in spans if s.name == "fortifyroot.litellm.safety")
+    _assert_attempt_sequence([retry_span])
 
     assert retry_span.parent.span_id == parent_span_exported.context.span_id, (
         "retry_attempt MUST be a child of the safety_wrapper parent"
     )
-    assert retry_span.attributes.get("fortifyroot.span.role") == "retry_attempt"
+    assert retry_span.attributes.get("fortifyroot.span.role") == "llm_attempt"
     assert retry_span.attributes.get("gen_ai.system") == "openai", (
         "gen_ai.system MUST be the routed provider, NOT the framework"
     )
@@ -260,8 +277,8 @@ def test_single_attempt_emits_one_retry_attempt_under_parent(fresh_tracer):
 
     # §4.5 marker: must be set on parent.
     assert parent_span_exported.attributes.get(
-        _FR_HAS_RETRY_ATTEMPT_CHILD_KEY
-    ) is True, "parent MUST carry has_retry_attempt_child=true"
+        _FR_HAS_ATTEMPT_CHILD_KEY
+    ) is True, "parent MUST carry has_attempt_child=true"
 
 
 def test_retry_attempt_accepts_anthropic_usage_token_names(fresh_tracer):
@@ -292,7 +309,7 @@ def test_retry_attempt_accepts_anthropic_usage_token_names(fresh_tracer):
 
     retry_span = next(
         s for s in exporter.get_finished_spans()
-        if s.name == _FR_RETRY_ATTEMPT_SPAN_NAME
+        if s.name.startswith(f"{_FR_LLM_ATTEMPT_SPAN_NAME_PREFIX}.attempt_")
     )
     assert retry_span.attributes.get("gen_ai.usage.input_tokens") == 11
     assert retry_span.attributes.get("gen_ai.usage.output_tokens") == 7
@@ -303,9 +320,15 @@ def test_retry_attempt_accepts_anthropic_usage_token_names(fresh_tracer):
 # ---------------------------------------------------------------------------
 
 def test_three_attempt_retry_path_emits_three_retry_attempt_spans(fresh_tracer):
-    """Three sequential attempts (429 → 429 → 200) under one parent.
-    Each gets its own litellm_call_id. Expect exactly 3
-    retry_attempt children, with IsError flags (2 ERROR + 1 OK)."""
+    """Shared-parent numbering mechanics for 429 → 429 → 200.
+
+    This drives the emitter directly with one safety_wrapper parent so
+    the attempt counter must produce attempt_1/2/3. Some production
+    LiteLLM retry helpers re-enter completion() per attempt and therefore
+    create one safety_wrapper per attempt; those multi-trace paths can
+    correctly surface as separate attempt_1 spans, as documented in
+    RETRY_LOOP.md.
+    """
     tracer, exporter, _ = fresh_tracer
 
     parent = tracer.start_span("fortifyroot.litellm.safety")
@@ -341,9 +364,10 @@ def test_three_attempt_retry_path_emits_three_retry_attempt_spans(fresh_tracer):
 
     retry_spans = [
         s for s in exporter.get_finished_spans()
-        if s.name == _FR_RETRY_ATTEMPT_SPAN_NAME
+        if s.name.startswith(f"{_FR_LLM_ATTEMPT_SPAN_NAME_PREFIX}.attempt_")
     ]
     assert len(retry_spans) == 3, f"expected 3 retry_attempt spans, got {len(retry_spans)}"
+    _assert_attempt_sequence(retry_spans)
 
     # 2 of them must be ERROR status, 1 OK.
     from opentelemetry.trace import StatusCode
@@ -377,7 +401,7 @@ def test_marker_set_AFTER_first_attempt_starts_not_at_parent_creation(fresh_trac
     # Before any retry_attempt: no marker.
     # (Use the live span object since it hasn't been exported yet.)
     parent_attrs_before = dict(parent.attributes or {})
-    assert _FR_HAS_RETRY_ATTEMPT_CHILD_KEY not in parent_attrs_before, (
+    assert _FR_HAS_ATTEMPT_CHILD_KEY not in parent_attrs_before, (
         "parent MUST NOT have the marker before any retry_attempt starts"
     )
 
@@ -386,7 +410,7 @@ def test_marker_set_AFTER_first_attempt_starts_not_at_parent_creation(fresh_trac
         _start_retry_attempt_span(kwargs)
     # After: parent has the marker.
     parent_attrs_after = dict(parent.attributes or {})
-    assert parent_attrs_after.get(_FR_HAS_RETRY_ATTEMPT_CHILD_KEY) is True, (
+    assert parent_attrs_after.get(_FR_HAS_ATTEMPT_CHILD_KEY) is True, (
         "parent MUST have the marker after first retry_attempt starts"
     )
 
@@ -410,7 +434,7 @@ def test_marker_NOT_set_when_no_retry_attempt_starts(fresh_tracer):
 
     spans = exporter.get_finished_spans()
     parent_exported = next(s for s in spans if s.name == "fortifyroot.litellm.safety")
-    assert _FR_HAS_RETRY_ATTEMPT_CHILD_KEY not in (parent_exported.attributes or {}), (
+    assert _FR_HAS_ATTEMPT_CHILD_KEY not in (parent_exported.attributes or {}), (
         "no retry_attempt → no marker → parent stays canonical for §4.5 dedup"
     )
 
@@ -475,7 +499,7 @@ def test_double_finalize_does_not_double_end(fresh_tracer):
 
     retry_spans = [
         s for s in exporter.get_finished_spans()
-        if s.name == _FR_RETRY_ATTEMPT_SPAN_NAME
+        if s.name.startswith(f"{_FR_LLM_ATTEMPT_SPAN_NAME_PREFIX}.attempt_")
     ]
     assert len(retry_spans) == 1, (
         f"expected exactly 1 retry_attempt span (idempotent finalize); "
@@ -500,7 +524,7 @@ def test_no_parent_span_does_not_emit_orphan_retry_attempt(fresh_tracer):
     _start_retry_attempt_span(kwargs)
 
     spans = exporter.get_finished_spans()
-    retry_spans = [s for s in spans if s.name == _FR_RETRY_ATTEMPT_SPAN_NAME]
+    retry_spans = [s for s in spans if s.name.startswith(f"{_FR_LLM_ATTEMPT_SPAN_NAME_PREFIX}.attempt_")]
     assert len(retry_spans) == 0, (
         f"orphan retry_attempt MUST NOT be emitted; got {len(retry_spans)}"
     )
@@ -559,7 +583,7 @@ def test_no_litellm_call_id_does_not_register_map_entry(fresh_tracer):
 
     retry_spans = [
         s for s in exporter.get_finished_spans()
-        if s.name == _FR_RETRY_ATTEMPT_SPAN_NAME
+        if s.name.startswith(f"{_FR_LLM_ATTEMPT_SPAN_NAME_PREFIX}.attempt_")
     ]
     assert len(retry_spans) == 0, "missing litellm_call_id → no emission"
     assert len(_FR_RETRY_ATTEMPT_MAP) == 0

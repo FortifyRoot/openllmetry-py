@@ -36,7 +36,7 @@ class _NoFortifyRootSpanExporter(InMemorySpanExporter):
     ``fortifyroot.`` from the upstream-test span exporter.
 
     ST-10.4 added per-attempt sibling spans (e.g.
-    ``fortifyroot.openai.retry_attempt``) under every openai logical
+    ``fortifyroot.openai.attempt_1``) under every openai logical
     call. Upstream/legacy OpenAI tests assert exact span-name lists
     (e.g. ``[span.name for span in spans] == ["openai.chat"]``); without
     a filter, every such assertion would now fail because the
@@ -56,7 +56,7 @@ class _NoFortifyRootSpanExporter(InMemorySpanExporter):
         # ST-10.4 retry_attempt siblings carry role=retry_attempt.
         return tuple(
             s for s in super().get_finished_spans()
-            if (s.attributes or {}).get("fortifyroot.span.role") != "retry_attempt"
+            if (s.attributes or {}).get("fortifyroot.span.role") != "llm_attempt"
         )
 
 

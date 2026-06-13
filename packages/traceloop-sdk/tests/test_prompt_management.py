@@ -13,18 +13,17 @@ from traceloop.sdk.prompts import get_prompt
 from traceloop.sdk.prompts.client import PromptRegistryClient
 
 
-# ST-10.4: filter ``fortifyroot.*.retry_attempt`` sibling spans out of
-# legacy exact-span-list / ``spans[0]`` assertions. Role-based filter
-# so every provider's retry_attempt is dropped uniformly. See addendum
-# 2026-05-16 in st_phase_10.txt for context.
+# ST-10.4: filter FortifyRoot LLM-attempt sibling spans out of legacy
+# exact-span-list / ``spans[0]`` assertions. Role-based filter so every
+# provider is dropped uniformly. See retry-loop docs for context.
 _FR_SPAN_ROLE_KEY = "fortifyroot.span.role"
-_FR_SPAN_ROLE_RETRY_ATTEMPT = "retry_attempt"
+_FR_SPAN_ROLE_LLM_ATTEMPT = "llm_attempt"
 
 
 def _without_retry_attempt_spans(spans):
     return [
         s for s in spans
-        if (s.attributes or {}).get(_FR_SPAN_ROLE_KEY) != _FR_SPAN_ROLE_RETRY_ATTEMPT
+        if (s.attributes or {}).get(_FR_SPAN_ROLE_KEY) != _FR_SPAN_ROLE_LLM_ATTEMPT
     ]
 
 prompts_json = """

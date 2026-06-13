@@ -58,7 +58,10 @@ from opentelemetry import context as context_api
 from opentelemetry import trace
 from opentelemetry.instrumentation.bedrock.version import __version__
 from opentelemetry.instrumentation.fortifyroot import (
+    FR_HAS_ATTEMPT_CHILD_KEY,
     is_framework_owned,
+    llm_attempt_attributes,
+    next_llm_attempt,
 )
 from opentelemetry.semconv_ai import SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY
 from opentelemetry.trace import SpanKind, Status, StatusCode
@@ -67,10 +70,10 @@ logger = logging.getLogger(__name__)
 
 
 # ST-10 §4.4 / §4.5 constants.
-_FR_RETRY_ATTEMPT_SPAN_NAME = "fortifyroot.bedrock.retry_attempt"
 _FR_SPAN_ROLE_KEY = "fortifyroot.span.role"
-_FR_SPAN_ROLE_RETRY_ATTEMPT = "retry_attempt"
-_FR_HAS_RETRY_ATTEMPT_CHILD_KEY = "fortifyroot.span.has_retry_attempt_child"
+_FR_LLM_ATTEMPT_SPAN_NAME_PREFIX = "fortifyroot.bedrock"
+_FR_SPAN_ROLE_LLM_ATTEMPT = "llm_attempt"
+_FR_HAS_ATTEMPT_CHILD_KEY = FR_HAS_ATTEMPT_CHILD_KEY
 
 # Event-name patterns. ``*`` matches any operation under bedrock-runtime.
 _BEFORE_SEND_PATTERN = "before-send.bedrock-runtime.*"
@@ -120,9 +123,9 @@ def _resolve_parent_span() -> Optional["trace.Span"]:
 
 def _set_parent_marker(parent_span: "trace.Span") -> None:
     try:
-        parent_span.set_attribute(_FR_HAS_RETRY_ATTEMPT_CHILD_KEY, True)
+        parent_span.set_attribute(_FR_HAS_ATTEMPT_CHILD_KEY, True)
     except Exception:
-        logger.debug("failed to set has_retry_attempt_child on parent", exc_info=True)
+        logger.debug("failed to set has_attempt_child on parent", exc_info=True)
 
 
 def _operation_from_event_name(event_name: str) -> str:
@@ -199,11 +202,15 @@ def _start_attempt_span(
     event_name: str,
     parent_span: "trace.Span",
 ) -> "trace.Span":
+    span_name, attempt_number, is_retry = next_llm_attempt(
+        parent_span,
+        _FR_LLM_ATTEMPT_SPAN_NAME_PREFIX,
+    )
     attrs: dict[str, Any] = {
-        _FR_SPAN_ROLE_KEY: _FR_SPAN_ROLE_RETRY_ATTEMPT,
         "gen_ai.system": "AWS",  # matches existing Bedrock instrumentor
         "gen_ai.operation.name": _operation_from_event_name(event_name),
     }
+    attrs.update(llm_attempt_attributes(attempt_number, is_retry))
     model = _model_from_request(request)
     if model:
         attrs["gen_ai.request.model"] = model
@@ -212,7 +219,7 @@ def _start_attempt_span(
     tracer = trace.get_tracer(__name__, __version__, _tracer_provider)
     parent_ctx = trace.set_span_in_context(parent_span)
     span = tracer.start_span(
-        _FR_RETRY_ATTEMPT_SPAN_NAME,
+        span_name,
         kind=SpanKind.CLIENT,
         attributes=attrs,
         context=parent_ctx,
@@ -271,7 +278,7 @@ def _finalize_success(span: "trace.Span", http_response: Any, parsed: Any) -> No
             span.set_attribute("error.type", err_type)
             span.set_status(Status(StatusCode.ERROR, f"http {status_code}"))
     except Exception:
-        logger.debug("failed to set success attrs on bedrock retry_attempt", exc_info=True)
+        logger.debug("failed to set success attrs on bedrock llm_attempt", exc_info=True)
 
 
 def _finalize_error(span: "trace.Span", exception: BaseException) -> None:
@@ -292,7 +299,7 @@ def _finalize_error(span: "trace.Span", exception: BaseException) -> None:
             pass
         span.set_status(Status(StatusCode.ERROR, str(exception)))
     except Exception:
-        logger.debug("failed to set error attrs on bedrock retry_attempt", exc_info=True)
+        logger.debug("failed to set error attrs on bedrock llm_attempt", exc_info=True)
 
 
 def _before_send_hook(event_name: Optional[str] = None, request: Any = None, **_kwargs) -> None:
@@ -476,12 +483,12 @@ def install_event_hooks_on_client(client: Any, tracer_provider=None) -> None:
         events.register(
             _BEFORE_SEND_PATTERN,
             _before_send_hook,
-            unique_id="fortifyroot.bedrock.retry_attempt.before-send",
+            unique_id="fortifyroot.bedrock.llm_attempt.before-send",
         )
         events.register(
             _RESPONSE_RECEIVED_PATTERN,
             _response_received_hook,
-            unique_id="fortifyroot.bedrock.retry_attempt.response-received",
+            unique_id="fortifyroot.bedrock.llm_attempt.response-received",
         )
     except Exception:
         logger.warning(
@@ -510,14 +517,14 @@ def uninstall_event_hooks_on_client(client: Any) -> None:
         try:
             events.unregister(
                 _BEFORE_SEND_PATTERN,
-                unique_id="fortifyroot.bedrock.retry_attempt.before-send",
+                unique_id="fortifyroot.bedrock.llm_attempt.before-send",
             )
         except Exception:
             pass
         try:
             events.unregister(
                 _RESPONSE_RECEIVED_PATTERN,
-                unique_id="fortifyroot.bedrock.retry_attempt.response-received",
+                unique_id="fortifyroot.bedrock.llm_attempt.response-received",
             )
         except Exception:
             pass
@@ -535,8 +542,8 @@ def _reset_tracer_provider_for_test() -> None:
 __all__ = [
     "install_event_hooks_on_client",
     "uninstall_event_hooks_on_client",
-    "_FR_RETRY_ATTEMPT_SPAN_NAME",
-    "_FR_HAS_RETRY_ATTEMPT_CHILD_KEY",
+    "_FR_LLM_ATTEMPT_SPAN_NAME_PREFIX",
+    "_FR_HAS_ATTEMPT_CHILD_KEY",
     "_before_send_hook",
     "_response_received_hook",
 ]

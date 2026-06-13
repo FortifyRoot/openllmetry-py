@@ -8,21 +8,20 @@ from openai import OpenAI
 from traceloop.sdk.decorators import workflow
 
 
-# ST-10.4: ``fortifyroot.openai.retry_attempt`` lands in the exporter
-# ahead of the logical ``openai.chat`` span; filter by role so the
-# legacy ``spans[0] == openai.chat`` assumption survives. The user's
-# custom span_postprocess_callback is intentionally still invoked on
-# the retry_attempt span (product-code contract: callback sees every
-# exported span); only the test's assertion is filtered. See addendum
-# 2026-05-16 in st_phase_10.txt for context.
+# ST-10.4: FortifyRoot LLM-attempt spans land in the exporter ahead of
+# the logical ``openai.chat`` span; filter by role so the legacy
+# ``spans[0] == openai.chat`` assumption survives. The user's custom
+# span_postprocess_callback is intentionally still invoked on the
+# attempt span (product-code contract: callback sees every exported
+# span); only the test's assertion is filtered.
 _FR_SPAN_ROLE_KEY = "fortifyroot.span.role"
-_FR_SPAN_ROLE_RETRY_ATTEMPT = "retry_attempt"
+_FR_SPAN_ROLE_LLM_ATTEMPT = "llm_attempt"
 
 
 def _without_retry_attempt_spans(spans):
     return [
         s for s in spans
-        if (s.attributes or {}).get(_FR_SPAN_ROLE_KEY) != _FR_SPAN_ROLE_RETRY_ATTEMPT
+        if (s.attributes or {}).get(_FR_SPAN_ROLE_KEY) != _FR_SPAN_ROLE_LLM_ATTEMPT
     ]
 
 
@@ -239,4 +238,3 @@ def test_get_default_span_processor():
     assert isinstance(processor, BatchSpanProcessor)
     assert hasattr(processor, "_traceloop_processor")
     assert getattr(processor, "_traceloop_processor") is True
-

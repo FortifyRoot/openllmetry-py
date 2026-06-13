@@ -106,7 +106,7 @@ class LangchainInstrumentor(BaseInstrumentor):
         # existing Traceloop handler. Per ST-10.0 C2 POC findings, this
         # captures per-HTTP-attempt callbacks on framework-layer retry
         # paths (e.g. Runnable.with_retry) and emits one
-        # fortifyroot.langchain.retry_attempt sibling span per attempt
+        # fortifyroot.langchain.attempt_<N> sibling span per attempt
         # under the parent_run_id's span. The handler gets the Traceloop
         # handler as a CONSTRUCTION-time reference so it can resolve the
         # workflow parent via Traceloop's run_id-keyed ``spans`` dict

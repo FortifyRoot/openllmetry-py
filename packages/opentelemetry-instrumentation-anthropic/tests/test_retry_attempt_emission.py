@@ -3,8 +3,8 @@
 Covers (per RETRY_LOOP.md §4.4 Anthropic row + §4.7 suppression):
   - Instrumentor symmetry: install/uninstall flips state cleanly and is
     idempotent.
-  - Single-attempt happy path: ONE retry_attempt span under the active
-    parent; parent gets has_retry_attempt_child=true; span carries
+  - Single-attempt happy path: ONE llm_attempt span under the active
+    parent; parent gets has_attempt_child=true; span carries
     role / gen_ai.system=anthropic / gen_ai.request.model / http.status_code.
   - Multi-attempt retry path: N siblings under one parent.
   - Error-attempt: status=ERROR, http.status_code, error.type.
@@ -28,8 +28,8 @@ import pytest
 from opentelemetry import context as context_api
 from opentelemetry import trace
 from opentelemetry.instrumentation.anthropic.retry_handler import (
-    _FR_HAS_RETRY_ATTEMPT_CHILD_KEY,
-    _FR_RETRY_ATTEMPT_SPAN_NAME,
+    _FR_HAS_ATTEMPT_CHILD_KEY,
+    _FR_LLM_ATTEMPT_SPAN_NAME_PREFIX,
     _async_send_wrapper,
     _has_wrappable_symbol,
     _is_installed_for_test,
@@ -38,6 +38,7 @@ from opentelemetry.instrumentation.anthropic.retry_handler import (
     uninstrument_retry_emitter,
 )
 from opentelemetry.instrumentation.fortifyroot import (
+    clear_attempt_counters_for_test,
     is_framework_owned,
     register_framework_attempt,
     retry_registry,
@@ -72,12 +73,14 @@ def fresh_tracer():
 @pytest.fixture(autouse=True)
 def reset_state():
     retry_registry._reset_for_test()
+    clear_attempt_counters_for_test()
     try:
         uninstrument_retry_emitter()
     except Exception:
         pass
     yield
     retry_registry._reset_for_test()
+    clear_attempt_counters_for_test()
     try:
         uninstrument_retry_emitter()
     except Exception:
@@ -116,7 +119,18 @@ def _make_response(status_code: int = 200, request_id: str = "req-abc",
 
 def _retry_spans(exporter: InMemorySpanExporter):
     return [s for s in exporter.get_finished_spans()
-            if s.name == _FR_RETRY_ATTEMPT_SPAN_NAME]
+            if s.name.startswith(f"{_FR_LLM_ATTEMPT_SPAN_NAME_PREFIX}.attempt_")]
+
+
+def _assert_attempt_sequence(spans):
+    by_number = sorted(
+        spans,
+        key=lambda s: int(s.attributes.get("fortifyroot.attempt.number") or -1),
+    )
+    for expected, span in enumerate(by_number, start=1):
+        assert span.name == f"{_FR_LLM_ATTEMPT_SPAN_NAME_PREFIX}.attempt_{expected}"
+        assert span.attributes.get("fortifyroot.attempt.number") == expected
+        assert span.attributes.get("fortifyroot.attempt.is_retry") is (expected > 1)
 
 
 # ---------------------------------------------------------------------------
@@ -212,8 +226,9 @@ def test_single_attempt_emits_one_span_with_marker(fresh_tracer):
     retry_spans = _retry_spans(exporter)
     assert len(retry_spans) == 1
     rs = retry_spans[0]
+    _assert_attempt_sequence(retry_spans)
     assert rs.parent.span_id == parent_exported.context.span_id
-    assert rs.attributes.get("fortifyroot.span.role") == "retry_attempt"
+    assert rs.attributes.get("fortifyroot.span.role") == "llm_attempt"
     assert rs.attributes.get("gen_ai.system") == "Anthropic"
     assert rs.attributes.get("gen_ai.request.model") == "claude-haiku-4-5"
     assert rs.attributes.get("gen_ai.operation.name") == "chat"
@@ -225,7 +240,7 @@ def test_single_attempt_emits_one_span_with_marker(fresh_tracer):
     assert rs.attributes.get("gen_ai.usage.output_tokens") == 4
     assert rs.attributes.get("server.address") == "api.anthropic.com"
     assert rs.attributes.get("server.port") == 443
-    assert parent_exported.attributes.get(_FR_HAS_RETRY_ATTEMPT_CHILD_KEY) is True
+    assert parent_exported.attributes.get(_FR_HAS_ATTEMPT_CHILD_KEY) is True
 
 
 # ---------------------------------------------------------------------------
@@ -249,6 +264,7 @@ def test_three_attempts_share_parent(fresh_tracer):
     parent_exported = next(s for s in spans if s.name == "anthropic.chat")
     retry_spans = _retry_spans(exporter)
     assert len(retry_spans) == 3
+    _assert_attempt_sequence(retry_spans)
 
     parent_ids = {s.parent.span_id for s in retry_spans}
     assert parent_ids == {parent_exported.context.span_id}
@@ -299,10 +315,10 @@ def test_marker_set_AFTER_first_attempt_not_at_parent_creation(fresh_tracer):
     tracer, exporter, _ = fresh_tracer
     request = _make_request()
     parent = tracer.start_span("anthropic.chat")
-    assert _FR_HAS_RETRY_ATTEMPT_CHILD_KEY not in dict(parent.attributes or {})
+    assert _FR_HAS_ATTEMPT_CHILD_KEY not in dict(parent.attributes or {})
     with trace.use_span(parent, end_on_exit=False):
         _sync_send_wrapper(lambda *a, **kw: _make_response(200), None, (request,), {})
-    assert dict(parent.attributes or {}).get(_FR_HAS_RETRY_ATTEMPT_CHILD_KEY) is True
+    assert dict(parent.attributes or {}).get(_FR_HAS_ATTEMPT_CHILD_KEY) is True
     parent.end()
 
 
@@ -313,7 +329,7 @@ def test_marker_NOT_set_when_no_attempts_fire(fresh_tracer):
     parent_exported = next(
         s for s in exporter.get_finished_spans() if s.name == "anthropic.chat"
     )
-    assert _FR_HAS_RETRY_ATTEMPT_CHILD_KEY not in (parent_exported.attributes or {})
+    assert _FR_HAS_ATTEMPT_CHILD_KEY not in (parent_exported.attributes or {})
 
 
 # ---------------------------------------------------------------------------
@@ -531,7 +547,7 @@ def test_streaming_request_skips_emission_entirely(fresh_tracer):
     parent_exported = next(
         s for s in exporter.get_finished_spans() if s.name == "anthropic.chat"
     )
-    assert _FR_HAS_RETRY_ATTEMPT_CHILD_KEY not in (parent_exported.attributes or {})
+    assert _FR_HAS_ATTEMPT_CHILD_KEY not in (parent_exported.attributes or {})
 
 
 def test_non_2xx_response_with_usage_in_body_populates_usage_tokens(fresh_tracer):

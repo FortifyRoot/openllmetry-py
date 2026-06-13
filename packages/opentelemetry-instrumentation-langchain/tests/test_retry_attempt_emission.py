@@ -6,13 +6,13 @@ Covers:
   - on_chat_model_start path (chat models — F1 finding from
     ST-10.0 C2 POC).
   - on_llm_start path (legacy completion LLMs).
-  - Single-attempt happy path: 1 retry_attempt span, parent has
-    has_retry_attempt_child=true, retry_attempt has gen_ai.system /
+  - Single-attempt happy path: 1 llm_attempt span, parent has
+    has_attempt_child=true, llm_attempt has gen_ai.system /
     gen_ai.request.model / role attributes.
-  - Multi-attempt retry path: 3 sequential attempts sharing a
-    parent_run_id → 3 retry_attempt SIBLINGS under one parent
-    span. This is the structural shape RetryDetectorProc requires
-    for retry-loop detection (siblings, not nested).
+  - Multiple callback invocations sharing a parent_run_id → 3
+    llm_attempt SIBLINGS under one parent span. LangChain numbering is
+    conservative: shared workflow parents can contain unrelated LLM calls,
+    so each emitted span remains attempt_1 / is_retry=false.
   - Marker timing (§4.5): parent gets the marker only AFTER the
     first attempt's start callback fires.
   - §4.7.1 token registration symmetry.
@@ -33,8 +33,8 @@ from opentelemetry.instrumentation.fortifyroot import (
 from opentelemetry.instrumentation.langchain import LangchainInstrumentor
 from opentelemetry.instrumentation.langchain.retry_handler import (
     _FortifyRootRetryHandler,
-    _FR_HAS_RETRY_ATTEMPT_CHILD_KEY,
-    _FR_RETRY_ATTEMPT_SPAN_NAME,
+    _FR_HAS_ATTEMPT_CHILD_KEY,
+    _FR_LLM_ATTEMPT_SPAN_NAME_PREFIX,
     _reset_state_for_test,
 )
 from opentelemetry.sdk.trace import TracerProvider
@@ -75,6 +75,13 @@ def reset_state():
     yield
     retry_registry._reset_for_test()
     _reset_state_for_test()
+
+
+def _assert_conservative_attempts(spans):
+    for span in spans:
+        assert span.name == f"{_FR_LLM_ATTEMPT_SPAN_NAME_PREFIX}.attempt_1"
+        assert span.attributes.get("fortifyroot.attempt.number") == 1
+        assert span.attributes.get("fortifyroot.attempt.is_retry") is False
 
 
 # ---------------------------------------------------------------------------
@@ -310,13 +317,14 @@ def test_on_chat_model_start_emits_retry_attempt(fresh_tracer):
 
     retry_spans = [
         s for s in exporter.get_finished_spans()
-        if s.name == _FR_RETRY_ATTEMPT_SPAN_NAME
+        if s.name.startswith(f"{_FR_LLM_ATTEMPT_SPAN_NAME_PREFIX}.attempt_")
     ]
     assert len(retry_spans) == 1, (
         f"on_chat_model_start MUST produce a retry_attempt span; got {len(retry_spans)}"
     )
+    _assert_conservative_attempts(retry_spans)
     rs = retry_spans[0]
-    assert rs.attributes.get("fortifyroot.span.role") == "retry_attempt"
+    assert rs.attributes.get("fortifyroot.span.role") == "llm_attempt"
     assert rs.attributes.get("gen_ai.system") == "openai", (
         "gen_ai.system must be the routed provider (openai), NOT 'langchain'"
     )
@@ -346,9 +354,10 @@ def test_on_llm_start_emits_retry_attempt(fresh_tracer):
 
     retry_spans = [
         s for s in exporter.get_finished_spans()
-        if s.name == _FR_RETRY_ATTEMPT_SPAN_NAME
+        if s.name.startswith(f"{_FR_LLM_ATTEMPT_SPAN_NAME_PREFIX}.attempt_")
     ]
     assert len(retry_spans) == 1
+    _assert_conservative_attempts(retry_spans)
     assert retry_spans[0].attributes.get("gen_ai.system") == "anthropic"
     assert retry_spans[0].attributes.get("gen_ai.request.model") == "claude-haiku-4-5"
     assert retry_spans[0].attributes.get("gen_ai.prompt.0.role") == "user"
@@ -362,7 +371,7 @@ def test_on_llm_start_emits_retry_attempt(fresh_tracer):
 def test_single_attempt_emits_one_sibling_with_marker(fresh_tracer):
     """A single attempt produces ONE retry_attempt span, parent under
     the workflow, and the workflow span carries
-    has_retry_attempt_child=true."""
+    has_attempt_child=true."""
     tracer, exporter, _ = fresh_tracer
     handler = _FortifyRootRetryHandler()
 
@@ -390,12 +399,13 @@ def test_single_attempt_emits_one_sibling_with_marker(fresh_tracer):
 
     spans = exporter.get_finished_spans()
     parent_exported = next(s for s in spans if s.name == "workflow")
-    retry_span = next(s for s in spans if s.name == _FR_RETRY_ATTEMPT_SPAN_NAME)
+    retry_span = next(s for s in spans if s.name.startswith(f"{_FR_LLM_ATTEMPT_SPAN_NAME_PREFIX}.attempt_"))
+    _assert_conservative_attempts([retry_span])
 
     assert retry_span.parent.span_id == parent_exported.context.span_id, (
         "retry_attempt MUST be a child of the workflow span (sibling-grouping requires this)"
     )
-    assert parent_exported.attributes.get(_FR_HAS_RETRY_ATTEMPT_CHILD_KEY) is True
+    assert parent_exported.attributes.get(_FR_HAS_ATTEMPT_CHILD_KEY) is True
     assert retry_span.attributes.get("gen_ai.response.id") == "resp-abc"
     assert retry_span.attributes.get("gen_ai.usage.input_tokens") == 10
     assert retry_span.attributes.get("gen_ai.usage.output_tokens") == 5
@@ -453,9 +463,10 @@ def test_three_attempts_share_parent_under_workflow(fresh_tracer):
 
     spans = exporter.get_finished_spans()
     parent_exported = next(s for s in spans if s.name == "workflow")
-    retry_spans = [s for s in spans if s.name == _FR_RETRY_ATTEMPT_SPAN_NAME]
+    retry_spans = [s for s in spans if s.name.startswith(f"{_FR_LLM_ATTEMPT_SPAN_NAME_PREFIX}.attempt_")]
 
     assert len(retry_spans) == 3, f"expected 3 retry_attempt spans, got {len(retry_spans)}"
+    _assert_conservative_attempts(retry_spans)
 
     # All 3 must share the workflow as parent — this is the sibling
     # invariant RetryDetectorProc relies on.
@@ -484,7 +495,7 @@ def test_three_attempts_share_parent_under_workflow(fresh_tracer):
 # ---------------------------------------------------------------------------
 
 def test_marker_set_AFTER_first_attempt_not_at_parent_creation(fresh_tracer):
-    """Per §4.5 marker-timing: parent gets has_retry_attempt_child=true
+    """Per §4.5 marker-timing: parent gets has_attempt_child=true
     only AFTER the first attempt's start callback fires, NOT at parent
     creation."""
     tracer, exporter, _ = fresh_tracer
@@ -492,7 +503,7 @@ def test_marker_set_AFTER_first_attempt_not_at_parent_creation(fresh_tracer):
 
     parent = tracer.start_span("workflow")
     # Before any retry_attempt: no marker.
-    assert _FR_HAS_RETRY_ATTEMPT_CHILD_KEY not in dict(parent.attributes or {})
+    assert _FR_HAS_ATTEMPT_CHILD_KEY not in dict(parent.attributes or {})
 
     with trace.use_span(parent, end_on_exit=False):
         run_id = uuid4()
@@ -505,7 +516,7 @@ def test_marker_set_AFTER_first_attempt_not_at_parent_creation(fresh_tracer):
             invocation_params={"model": "gpt-4o-mini"},
         )
     # After first attempt start: parent has the marker.
-    assert dict(parent.attributes or {}).get(_FR_HAS_RETRY_ATTEMPT_CHILD_KEY) is True
+    assert dict(parent.attributes or {}).get(_FR_HAS_ATTEMPT_CHILD_KEY) is True
 
     handler.on_llm_end(_FakeLLMResult(model="gpt-4o-mini"), run_id=run_id)
     parent.end()
@@ -523,7 +534,7 @@ def test_marker_NOT_set_when_no_attempts_fire(fresh_tracer):
     parent_exported = next(
         s for s in exporter.get_finished_spans() if s.name == "workflow"
     )
-    assert _FR_HAS_RETRY_ATTEMPT_CHILD_KEY not in (parent_exported.attributes or {})
+    assert _FR_HAS_ATTEMPT_CHILD_KEY not in (parent_exported.attributes or {})
 
 
 # ---------------------------------------------------------------------------
@@ -576,7 +587,7 @@ def test_no_parent_does_not_emit_orphan_retry_attempt(fresh_tracer):
 
     retry_spans = [
         s for s in exporter.get_finished_spans()
-        if s.name == _FR_RETRY_ATTEMPT_SPAN_NAME
+        if s.name.startswith(f"{_FR_LLM_ATTEMPT_SPAN_NAME_PREFIX}.attempt_")
     ]
     assert len(retry_spans) == 0
 
@@ -607,7 +618,7 @@ def test_double_finalize_does_not_double_end(fresh_tracer):
 
     retry_spans = [
         s for s in exporter.get_finished_spans()
-        if s.name == _FR_RETRY_ATTEMPT_SPAN_NAME
+        if s.name.startswith(f"{_FR_LLM_ATTEMPT_SPAN_NAME_PREFIX}.attempt_")
     ]
     assert len(retry_spans) == 1, (
         f"expected exactly 1 retry_attempt span (idempotent finalize); got {len(retry_spans)}"

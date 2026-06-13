@@ -3,8 +3,8 @@
 Covers (per RETRY_LOOP.md §4.4 OpenAI row + §4.7 suppression):
   - Instrumentor symmetry: install/uninstall flips state cleanly and is
     idempotent.
-  - Single-attempt happy path: ONE retry_attempt span under the active
-    parent; parent gets has_retry_attempt_child=true; span carries
+  - Single-attempt happy path: ONE llm_attempt span under the active
+    parent; parent gets has_attempt_child=true; span carries
     role / gen_ai.system=openai / gen_ai.request.model / http.status_code.
   - Multi-attempt retry path: N siblings under one parent (the
     structural shape RetryDetectorProc relies on).
@@ -37,14 +37,15 @@ import pytest
 from opentelemetry import context as context_api
 from opentelemetry import trace
 from opentelemetry.instrumentation.fortifyroot import (
+    clear_attempt_counters_for_test,
     is_framework_owned,
     register_framework_attempt,
     retry_registry,
     unregister_framework_attempt,
 )
 from opentelemetry.instrumentation.openai.retry_handler import (
-    _FR_HAS_RETRY_ATTEMPT_CHILD_KEY,
-    _FR_RETRY_ATTEMPT_SPAN_NAME,
+    _FR_HAS_ATTEMPT_CHILD_KEY,
+    _FR_LLM_ATTEMPT_SPAN_NAME_PREFIX,
     OPENAI_DIRECT_RETRY_PARENT_ACTIVE_KEY,
     _async_send_wrapper,
     _has_wrappable_symbol,
@@ -90,6 +91,7 @@ def fresh_tracer():
 def reset_registry_and_state():
     """Each test starts with empty registry + emitter uninstalled."""
     retry_registry._reset_for_test()
+    clear_attempt_counters_for_test()
     # Defensive uninstall in case a prior test left it installed.
     try:
         uninstrument_retry_emitter()
@@ -97,6 +99,7 @@ def reset_registry_and_state():
         pass
     yield
     retry_registry._reset_for_test()
+    clear_attempt_counters_for_test()
     try:
         uninstrument_retry_emitter()
     except Exception:
@@ -144,7 +147,18 @@ def _make_response(status_code: int = 200, request_id: str = "req-abc",
 
 def _retry_spans(exporter: InMemorySpanExporter):
     return [s for s in exporter.get_finished_spans()
-            if s.name == _FR_RETRY_ATTEMPT_SPAN_NAME]
+            if s.name.startswith(f"{_FR_LLM_ATTEMPT_SPAN_NAME_PREFIX}.attempt_")]
+
+
+def _assert_attempt_sequence(spans):
+    by_number = sorted(
+        spans,
+        key=lambda s: int(s.attributes.get("fortifyroot.attempt.number") or -1),
+    )
+    for expected, span in enumerate(by_number, start=1):
+        assert span.name == f"{_FR_LLM_ATTEMPT_SPAN_NAME_PREFIX}.attempt_{expected}"
+        assert span.attributes.get("fortifyroot.attempt.number") == expected
+        assert span.attributes.get("fortifyroot.attempt.is_retry") is (expected > 1)
 
 
 # ---------------------------------------------------------------------------
@@ -265,10 +279,11 @@ def test_single_attempt_emits_one_span_with_marker(fresh_tracer):
     retry_spans = _retry_spans(exporter)
     assert len(retry_spans) == 1
     rs = retry_spans[0]
+    _assert_attempt_sequence(retry_spans)
     assert rs.parent.span_id == parent_exported.context.span_id, (
         "retry_attempt must be a child of the active parent"
     )
-    assert rs.attributes.get("fortifyroot.span.role") == "retry_attempt"
+    assert rs.attributes.get("fortifyroot.span.role") == "llm_attempt"
     assert rs.attributes.get("gen_ai.system") == "openai"
     assert rs.attributes.get("gen_ai.request.model") == "gpt-4o-mini"
     assert rs.attributes.get("gen_ai.operation.name") == "chat"
@@ -281,7 +296,7 @@ def test_single_attempt_emits_one_span_with_marker(fresh_tracer):
     assert rs.attributes.get("gen_ai.usage.output_tokens") == 3
     assert rs.attributes.get("server.address") == "api.openai.com"
     assert rs.attributes.get("server.port") == 443
-    assert parent_exported.attributes.get(_FR_HAS_RETRY_ATTEMPT_CHILD_KEY) is True
+    assert parent_exported.attributes.get(_FR_HAS_ATTEMPT_CHILD_KEY) is True
 
 
 # ---------------------------------------------------------------------------
@@ -311,6 +326,7 @@ def test_three_attempts_share_parent(fresh_tracer):
     parent_exported = next(s for s in spans if s.name == "openai.chat")
     retry_spans = _retry_spans(exporter)
     assert len(retry_spans) == 3, f"expected 3 retry_attempts, got {len(retry_spans)}"
+    _assert_attempt_sequence(retry_spans)
 
     parent_ids = {s.parent.span_id for s in retry_spans}
     assert parent_ids == {parent_exported.context.span_id}, (
@@ -400,13 +416,13 @@ def test_marker_set_AFTER_first_attempt_not_at_parent_creation(fresh_tracer):
 
     parent = tracer.start_span("openai.chat")
     # Before any retry_attempt: no marker.
-    assert _FR_HAS_RETRY_ATTEMPT_CHILD_KEY not in dict(parent.attributes or {})
+    assert _FR_HAS_ATTEMPT_CHILD_KEY not in dict(parent.attributes or {})
 
     with trace.use_span(parent, end_on_exit=False):
         _sync_send_wrapper(lambda *a, **kw: _make_response(200), None, (request,), {})
 
     # After first attempt: marker present on the still-open parent.
-    assert dict(parent.attributes or {}).get(_FR_HAS_RETRY_ATTEMPT_CHILD_KEY) is True
+    assert dict(parent.attributes or {}).get(_FR_HAS_ATTEMPT_CHILD_KEY) is True
     parent.end()
 
 
@@ -417,7 +433,7 @@ def test_marker_NOT_set_when_no_attempts_fire(fresh_tracer):
     parent_exported = next(
         s for s in exporter.get_finished_spans() if s.name == "openai.chat"
     )
-    assert _FR_HAS_RETRY_ATTEMPT_CHILD_KEY not in (parent_exported.attributes or {})
+    assert _FR_HAS_ATTEMPT_CHILD_KEY not in (parent_exported.attributes or {})
 
 
 # ---------------------------------------------------------------------------
@@ -567,6 +583,7 @@ def test_two_concurrent_async_sends_each_emit_a_retry_attempt(fresh_tracer):
         f"This is the §4.7 self-registration regression — the second task is being "
         f"suppressed by the first task's lingering framework token."
     )
+    _assert_attempt_sequence(retry_spans)
 
 
 # ---------------------------------------------------------------------------
@@ -700,12 +717,12 @@ def test_streaming_request_skips_emission_entirely(fresh_tracer):
         f"got {len(retry_spans)} span(s). The parent span stays the "
         f"canonical LLM event."
     )
-    # Parent MUST NOT receive the has_retry_attempt_child marker
+    # Parent MUST NOT receive the has_attempt_child marker
     # either (no child was emitted).
     parent_exported = next(
         s for s in exporter.get_finished_spans() if s.name == "openai.chat"
     )
-    assert _FR_HAS_RETRY_ATTEMPT_CHILD_KEY not in (parent_exported.attributes or {})
+    assert _FR_HAS_ATTEMPT_CHILD_KEY not in (parent_exported.attributes or {})
 
 
 def test_non_2xx_response_with_usage_in_body_populates_usage_tokens(fresh_tracer):
@@ -903,7 +920,7 @@ def test_tracer_provider_plumbed_through_instrument_retry_emitter():
         uninstrument_retry_emitter()
 
     spans = exporter.get_finished_spans()
-    retry_spans = [s for s in spans if s.name == _FR_RETRY_ATTEMPT_SPAN_NAME]
+    retry_spans = [s for s in spans if s.name.startswith(f"{_FR_LLM_ATTEMPT_SPAN_NAME_PREFIX}.attempt_")]
     assert len(retry_spans) == 1, (
         f"retry_attempt MUST be exported via the explicit tracer_provider "
         f"passed to instrument_retry_emitter; saw {len(retry_spans)} in this exporter "
