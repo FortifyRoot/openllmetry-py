@@ -214,7 +214,7 @@ class TracerWrapper(object):
 
         print(
             Fore.RED
-            + "Warning: FortifyRoot not initialized, make sure you call fortifyroot.init()"
+            + "Warning: FortifyRoot Ocelle not initialized, make sure you call fortifyroot.ocelle.init()"
         )
         print(Fore.RESET)
         return False
@@ -627,8 +627,9 @@ def init_instrumentations(
             print(Fore.RED + f"Warning: {instrument} instrumentation does not exist.")
             print(
                 "Usage:\n"
-                "from fortifyroot import Instruments\n"
-                "fortifyroot.init(app_name='...', instruments=set([Instruments.OPENAI]))"
+                "from fortifyroot.ocelle import Instruments\n"
+                "import fortifyroot.ocelle as ocelle\n"
+                "ocelle.init(app_name='...', instruments=set([Instruments.OPENAI]))"
             )
             print(Fore.RESET)
 

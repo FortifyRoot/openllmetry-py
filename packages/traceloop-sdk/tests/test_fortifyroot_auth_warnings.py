@@ -96,7 +96,7 @@ def _auth_warnings(caplog):
     return [
         record
         for record in caplog.records
-        if "FortifyRoot SDK auth warning" in record.getMessage()
+        if "FortifyRoot Ocelle SDK auth warning" in record.getMessage()
     ]
 
 
@@ -181,7 +181,7 @@ def test_grpc_exporter_client_proxy_warns_on_auth_failure(
     with caplog.at_level("WARNING"), pytest.raises(_FakeAuthRpcError):
         exporter._client.Export()
 
-    assert "FortifyRoot SDK auth warning" in caplog.text
+    assert "FortifyRoot Ocelle SDK auth warning" in caplog.text
     assert signal in caplog.text
     assert f"gRPC {code.name}" in caplog.text
 
@@ -211,7 +211,7 @@ def test_trace_http_exporter_warns_end_to_end_with_mock_collector(caplog):
         server.server_close()
         thread.join(timeout=2)
 
-    assert "FortifyRoot SDK auth warning" in caplog.text
+    assert "FortifyRoot Ocelle SDK auth warning" in caplog.text
     assert "traces" in caplog.text
     assert "HTTP 401" in caplog.text
 
@@ -258,9 +258,10 @@ def test_auth_warning_log_is_not_reexported_through_otel_logging_handler(caplog)
         assert provider is not None
         provider.force_flush()
 
-        assert "FortifyRoot SDK auth warning" in caplog.text
+        assert "FortifyRoot Ocelle SDK auth warning" in caplog.text
         assert not any(
-            "FortifyRoot SDK auth warning" in body for body in log_exporter.bodies
+            "FortifyRoot Ocelle SDK auth warning" in body
+            for body in log_exporter.bodies
         )
     finally:
         for handler in list(root_logger.handlers):

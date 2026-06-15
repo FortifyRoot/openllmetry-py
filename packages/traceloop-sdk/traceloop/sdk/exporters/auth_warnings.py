@@ -70,7 +70,7 @@ def _warn_once(signal: str, status: str, endpoint: Any) -> None:
         _WARNED_AUTH_FAILURES[key] = now
 
     logger.warning(
-        "FortifyRoot SDK auth warning: %s export was rejected by the configured OTLP endpoint (%s) with %s. "
+        "FortifyRoot Ocelle SDK auth warning: %s export was rejected by the configured OTLP endpoint (%s) with %s. "
         "If this endpoint is FortifyRoot, the SDK API key may be invalid, revoked, deleted, or missing permissions. "
         "Telemetry will not reach the OTLP endpoint until a valid credential is configured.",
         signal,
