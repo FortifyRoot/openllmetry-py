@@ -79,7 +79,7 @@ class Traceloop:
             TracerWrapper.set_disabled(True)
             print(
                 Fore.YELLOW
-                + "FortifyRoot instrumentation is disabled via init flag"
+                + "FortifyRoot Ocelle instrumentation is disabled via init flag"
                 + Fore.RESET
             )
             return
@@ -95,7 +95,7 @@ class Traceloop:
         enable_content_tracing = is_content_tracing_enabled()
 
         if exporter or processor:
-            print(Fore.GREEN + "FortifyRoot exporting traces to a custom exporter")
+            print(Fore.GREEN + "FortifyRoot Ocelle exporting traces to a custom exporter")
 
         headers = os.getenv("TRACELOOP_HEADERS") or headers
 
@@ -120,13 +120,13 @@ class Traceloop:
         if not exporter and not processor and headers:
             print(
                 Fore.GREEN
-                + f"FortifyRoot exporting traces to {api_endpoint}, authenticating with custom headers"
+                + f"FortifyRoot Ocelle exporting traces to {api_endpoint}, authenticating with custom headers"
             )
 
         if api_key and not exporter and not processor and not headers:
             print(
                 Fore.GREEN
-                + f"FortifyRoot exporting traces to {api_endpoint} authenticating with bearer token"
+                + f"FortifyRoot Ocelle exporting traces to {api_endpoint} authenticating with bearer token"
             )
             headers = {
                 "Authorization": f"Bearer {api_key}",
@@ -166,7 +166,7 @@ class Traceloop:
                 os.getenv("TRACELOOP_METRICS_HEADERS") or metrics_headers or headers
             )
             if metrics_exporter or processor:
-                print(Fore.GREEN + "FortifyRoot exporting metrics to a custom exporter")
+                print(Fore.GREEN + "FortifyRoot Ocelle exporting metrics to a custom exporter")
 
             MetricsWrapper.set_static_params(
                 resource_attributes, metrics_endpoint, metrics_headers
@@ -179,7 +179,7 @@ class Traceloop:
                 os.getenv("TRACELOOP_LOGGING_HEADERS") or logging_headers or headers
             )
             if logging_exporter or processor:
-                print(Fore.GREEN + "FortifyRoot exporting logs to a custom exporter")
+                print(Fore.GREEN + "FortifyRoot Ocelle exporting logs to a custom exporter")
 
             LoggerWrapper.set_static_params(
                 resource_attributes, logging_endpoint, logging_headers
@@ -197,7 +197,7 @@ class Traceloop:
                 Traceloop.__fetcher.run()
                 print(
                     Fore.GREEN
-                    + "FortifyRoot syncing configuration and prompts"
+                    + "FortifyRoot Ocelle syncing configuration and prompts"
                     + Fore.RESET
                 )
             Traceloop.__client = Client(
