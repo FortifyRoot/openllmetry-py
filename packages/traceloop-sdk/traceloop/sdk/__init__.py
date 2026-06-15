@@ -269,7 +269,7 @@ class Traceloop:
         """
         if not Traceloop.__client:
             raise Exception(
-                "Client not initialized, you should call fortifyroot.init() first. "
+                "Client not initialized, you should call fortifyroot.ocelle.init() first. "
                 "If you are still getting this error - you are missing the api key"
             )
         return Traceloop.__client
