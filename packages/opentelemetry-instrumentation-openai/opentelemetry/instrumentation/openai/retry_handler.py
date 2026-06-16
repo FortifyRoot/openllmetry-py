@@ -61,7 +61,10 @@ from opentelemetry.instrumentation.fortifyroot import (
 )
 from opentelemetry.instrumentation.openai.version import __version__
 from opentelemetry.instrumentation.utils import unwrap
-from opentelemetry.semconv_ai import SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY
+from opentelemetry.semconv_ai import (
+    SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY,
+    SpanAttributes,
+)
 from opentelemetry.trace import SpanKind, Status, StatusCode
 from wrapt import wrap_function_wrapper
 
@@ -413,6 +416,17 @@ def _extract_usage_from_body(span: "trace.Span", response: Any) -> None:
                 span.set_attribute("gen_ai.usage.input_tokens", pt)
             if isinstance(ct, int):
                 span.set_attribute("gen_ai.usage.output_tokens", ct)
+            total_tokens = usage.get("total_tokens")
+            if isinstance(total_tokens, int):
+                span.set_attribute(SpanAttributes.LLM_USAGE_TOTAL_TOKENS, total_tokens)
+            prompt_tokens_details = usage.get("prompt_tokens_details")
+            if isinstance(prompt_tokens_details, dict):
+                cached_tokens = prompt_tokens_details.get("cached_tokens")
+                if isinstance(cached_tokens, int):
+                    span.set_attribute(
+                        SpanAttributes.LLM_USAGE_CACHE_READ_INPUT_TOKENS,
+                        cached_tokens,
+                    )
     except Exception:
         logger.debug("failed to extract usage from openai response body", exc_info=True)
 

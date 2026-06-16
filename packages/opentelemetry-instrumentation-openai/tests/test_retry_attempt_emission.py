@@ -135,7 +135,15 @@ def _make_response(status_code: int = 200, request_id: str = "req-abc",
         body = {
             "id": f"chatcmpl-{request_id}",
             "model": "gpt-4o-mini-2024-07-18",
-            "usage": {"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10},
+            "usage": {
+                "prompt_tokens": 7,
+                "completion_tokens": 3,
+                "total_tokens": 10,
+                "prompt_tokens_details": {
+                    "cached_tokens": 5,
+                    "audio_tokens": 0,
+                },
+            },
         }
     headers = {"x-request-id": request_id, "openai-request-id": request_id}
     return SimpleNamespace(
@@ -294,6 +302,8 @@ def test_single_attempt_emits_one_span_with_marker(fresh_tracer):
     assert rs.attributes.get("gen_ai.response.model") == "gpt-4o-mini-2024-07-18"
     assert rs.attributes.get("gen_ai.usage.input_tokens") == 7
     assert rs.attributes.get("gen_ai.usage.output_tokens") == 3
+    assert rs.attributes.get("llm.usage.total_tokens") == 10
+    assert rs.attributes.get("gen_ai.usage.cache_read_input_tokens") == 5
     assert rs.attributes.get("server.address") == "api.openai.com"
     assert rs.attributes.get("server.port") == 443
     assert parent_exported.attributes.get(_FR_HAS_ATTEMPT_CHILD_KEY) is True
