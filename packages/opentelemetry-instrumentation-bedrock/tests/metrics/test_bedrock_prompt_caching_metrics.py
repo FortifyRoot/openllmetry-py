@@ -1,9 +1,25 @@
+# NOTE:
+# This file has been modified by FortifyRoot.
+# Original source: https://github.com/traceloop/openllmetry
+
 import json
 
 import pytest
 
 from opentelemetry.instrumentation.bedrock import PromptCaching
 from opentelemetry.instrumentation.bedrock.prompt_caching import CacheSpanAttrs
+
+
+def test_prompt_caching_metric_name_is_canonical():
+    # The Bedrock prompt-caching counter must be emitted with the canonical
+    # FortifyRoot/backend contract name `gen_ai.prompt_caching` (underscore),
+    # matching the span attribute `CacheSpanAttrs.CACHED` and the backend metric
+    # catalog. Prometheus collapses `gen_ai.prompt.caching` and
+    # `gen_ai.prompt_caching` to the same series, but the OTel/contract name must
+    # match exactly for registry/discovery and SDK/backend round-trips.
+    assert PromptCaching.LLM_BEDROCK_PROMPT_CACHING == "gen_ai.prompt_caching"
+    assert CacheSpanAttrs.CACHED == "gen_ai.prompt_caching"
+    assert PromptCaching.LLM_BEDROCK_PROMPT_CACHING == CacheSpanAttrs.CACHED
 
 
 def call(brt):
