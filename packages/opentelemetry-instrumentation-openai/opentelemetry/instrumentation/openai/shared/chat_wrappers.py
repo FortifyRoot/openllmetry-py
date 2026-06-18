@@ -76,6 +76,13 @@ CONTENT_FILTER_KEY = "content_filter_results"
 
 LLM_REQUEST_TYPE = LLMRequestTypeValues.CHAT
 
+# FR: stable internal span attributes carrying streaming latency as integer
+# milliseconds, so the backend can extract TTFT/STTG into RDS llm_usage_events.
+# Additive to (not a replacement for) the Mimir streaming histograms. Contract:
+# fr-backend/docs/development/STREAMING_LATENCY_TTFT_STTG_PLAN.md
+FR_STREAMING_TIME_TO_FIRST_TOKEN_MS = "fortifyroot.llm.streaming.time_to_first_token_ms"
+FR_STREAMING_TIME_TO_GENERATE_MS = "fortifyroot.llm.streaming.time_to_generate_ms"
+
 logger = logging.getLogger(__name__)
 
 
@@ -773,13 +780,22 @@ class ChatStream(ObjectProxy):
         self._span.add_event(
             name=f"{SpanAttributes.LLM_CONTENT_COMPLETION_CHUNK}")
 
-        if self._first_token and self._streaming_time_to_first_token:
+        if self._first_token:
             self._time_of_first_token = time.time()
-            self._streaming_time_to_first_token.record(
-                self._time_of_first_token - self._start_time,
-                attributes=self._shared_attributes(),
-            )
+            if self._streaming_time_to_first_token:
+                self._streaming_time_to_first_token.record(
+                    self._time_of_first_token - self._start_time,
+                    attributes=self._shared_attributes(),
+                )
             self._first_token = False
+            # FR: also persist TTFT (ms, int) on the span so the backend can
+            # extract it into RDS (the Mimir histogram above is unchanged).
+            if self._span and self._span.is_recording():
+                _set_span_attribute(
+                    self._span,
+                    FR_STREAMING_TIME_TO_FIRST_TOKEN_MS,
+                    round((self._time_of_first_token - self._start_time) * 1000),
+                )
 
         item = self._streaming_safety.process_chunk(item)
         _accumulate_stream_items(item, self._complete_response)
@@ -846,6 +862,20 @@ class ChatStream(ObjectProxy):
                 if should_send_prompts():
                     _set_completions(
                         self._span, self._complete_response.get("choices"))
+
+            # FR: persist STTG (ms, int) on the span for RDS extraction, only
+            # when a first token actually arrived (mirrors the TTFT capture).
+            if (
+                self._span
+                and self._span.is_recording()
+                and not self._first_token
+                and self._time_of_first_token
+            ):
+                _set_span_attribute(
+                    self._span,
+                    FR_STREAMING_TIME_TO_GENERATE_MS,
+                    round((time.time() - self._time_of_first_token) * 1000),
+                )
 
             self._span.set_status(Status(StatusCode.OK))
             self._span.end()
@@ -950,11 +980,19 @@ def _build_from_streaming_response(
 
         item_to_yield = streaming_safety.process_chunk(item)
 
-        if first_token and streaming_time_to_first_token:
+        if first_token:
             time_of_first_token = time.time()
-            streaming_time_to_first_token.record(
-                time_of_first_token - start_time)
+            if streaming_time_to_first_token:
+                streaming_time_to_first_token.record(
+                    time_of_first_token - start_time)
             first_token = False
+            # FR: also persist TTFT (ms, int) on the span for RDS extraction.
+            if span and span.is_recording():
+                _set_span_attribute(
+                    span,
+                    FR_STREAMING_TIME_TO_FIRST_TOKEN_MS,
+                    round((time_of_first_token - start_time) * 1000),
+                )
 
         _accumulate_stream_items(item, complete_response)
 
@@ -989,6 +1027,15 @@ def _build_from_streaming_response(
         duration_histogram.record(duration, attributes=shared_attributes)
     if streaming_time_to_generate and time_of_first_token:
         streaming_time_to_generate.record(time.time() - time_of_first_token)
+
+    # FR: persist STTG (ms, int) on the span for RDS extraction, only when a
+    # first token actually arrived (not first_token).
+    if span and span.is_recording() and not first_token and time_of_first_token:
+        _set_span_attribute(
+            span,
+            FR_STREAMING_TIME_TO_GENERATE_MS,
+            round((time.time() - time_of_first_token) * 1000),
+        )
 
     _set_response_attributes(span, complete_response)
     if should_emit_events():
@@ -1027,11 +1074,19 @@ async def _abuild_from_streaming_response(
 
         item_to_yield = streaming_safety.process_chunk(item)
 
-        if first_token and streaming_time_to_first_token:
+        if first_token:
             time_of_first_token = time.time()
-            streaming_time_to_first_token.record(
-                time_of_first_token - start_time)
+            if streaming_time_to_first_token:
+                streaming_time_to_first_token.record(
+                    time_of_first_token - start_time)
             first_token = False
+            # FR: also persist TTFT (ms, int) on the span for RDS extraction.
+            if span and span.is_recording():
+                _set_span_attribute(
+                    span,
+                    FR_STREAMING_TIME_TO_FIRST_TOKEN_MS,
+                    round((time_of_first_token - start_time) * 1000),
+                )
 
         _accumulate_stream_items(item, complete_response)
 
@@ -1066,6 +1121,15 @@ async def _abuild_from_streaming_response(
         duration_histogram.record(duration, attributes=shared_attributes)
     if streaming_time_to_generate and time_of_first_token:
         streaming_time_to_generate.record(time.time() - time_of_first_token)
+
+    # FR: persist STTG (ms, int) on the span for RDS extraction, only when a
+    # first token actually arrived (not first_token).
+    if span and span.is_recording() and not first_token and time_of_first_token:
+        _set_span_attribute(
+            span,
+            FR_STREAMING_TIME_TO_GENERATE_MS,
+            round((time.time() - time_of_first_token) * 1000),
+        )
 
     _set_response_attributes(span, complete_response)
     if should_emit_events():
