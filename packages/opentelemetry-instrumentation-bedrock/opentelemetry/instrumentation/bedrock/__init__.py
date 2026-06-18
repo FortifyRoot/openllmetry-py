@@ -493,7 +493,12 @@ class GuardrailMeters:
 
 class PromptCaching:
     # will be moved under the AI SemConv. Not namespaced since also OpenAI supports this.
-    LLM_BEDROCK_PROMPT_CACHING = "gen_ai.prompt.caching"
+    # FR: canonical name uses an underscore (`gen_ai.prompt_caching`) to match the
+    # FortifyRoot backend metric contract / catalog and the span attribute
+    # `CacheSpanAttrs.CACHED`. Prometheus normalizes both forms to
+    # `gen_ai_prompt_caching`, but the OTel/contract name must match exactly for
+    # registry, discovery, and SDK/backend round-trips.
+    LLM_BEDROCK_PROMPT_CACHING = "gen_ai.prompt_caching"
 
 
 def _create_metrics(meter: Meter):
