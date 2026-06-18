@@ -3,12 +3,15 @@ from types import SimpleNamespace
 import pytest
 
 from opentelemetry.instrumentation.anthropic import safety
+from opentelemetry.instrumentation.anthropic.config import Config
 from opentelemetry.instrumentation.anthropic.streaming_safety import (
     AnthropicStreamingSafety,
 )
 from opentelemetry.instrumentation.anthropic.streaming import (
     AnthropicAsyncStream,
     AnthropicStream,
+    FR_STREAMING_TIME_TO_FIRST_TOKEN_MS,
+    FR_STREAMING_TIME_TO_GENERATE_MS,
 )
 from opentelemetry.instrumentation.fortifyroot import SafetyDecision, SafetyResult
 from opentelemetry.instrumentation.fortifyroot import (
@@ -410,6 +413,89 @@ def test_anthropic_sync_stream_span_not_ended_before_last_item_consumed():
     assert len(exporter.get_finished_spans()) == 1
 
 
+def test_anthropic_sync_stream_sets_streaming_latency_span_attrs(monkeypatch):
+    clear_safety_handlers()
+    exporter, tracer = _test_tracer()
+
+    timestamps = iter([101.25, 103.0])
+    monkeypatch.setattr(
+        "opentelemetry.instrumentation.anthropic.streaming.time.time",
+        lambda: next(timestamps),
+    )
+
+    span = tracer.start_span("anthropic.chat")
+    stream = AnthropicStream(
+        span,
+        _Iterator(
+            [
+                SimpleNamespace(
+                    type="content_block_start",
+                    index=0,
+                    content_block=SimpleNamespace(type="text"),
+                ),
+                SimpleNamespace(
+                    type="content_block_delta",
+                    index=0,
+                    delta=SimpleNamespace(type="text_delta", text="hello"),
+                ),
+            ]
+        ),
+        SimpleNamespace(count_tokens=lambda text: len(text)),
+        100.0,
+        kwargs={},
+    )
+
+    first = next(stream)
+    second = next(stream)
+    with pytest.raises(StopIteration):
+        next(stream)
+
+    finished = exporter.get_finished_spans()
+    assert first.type == "content_block_start"
+    assert second.type == "content_block_delta"
+    assert len(finished) == 1
+    assert finished[0].attributes[FR_STREAMING_TIME_TO_FIRST_TOKEN_MS] == 1250
+    assert finished[0].attributes[FR_STREAMING_TIME_TO_GENERATE_MS] == 1750
+
+
+def test_anthropic_sync_stream_without_token_omits_streaming_latency_attrs(monkeypatch):
+    clear_safety_handlers()
+    exporter, tracer = _test_tracer()
+
+    timestamps = iter([301.0])
+    monkeypatch.setattr(
+        "opentelemetry.instrumentation.anthropic.streaming.time.time",
+        lambda: next(timestamps),
+    )
+
+    span = tracer.start_span("anthropic.chat")
+    stream = AnthropicStream(
+        span,
+        _Iterator(
+            [
+                SimpleNamespace(
+                    type="content_block_start",
+                    index=0,
+                    content_block=SimpleNamespace(type="text"),
+                )
+            ]
+        ),
+        SimpleNamespace(count_tokens=lambda text: len(text)),
+        300.0,
+        kwargs={},
+    )
+
+    first = next(stream)
+    with pytest.raises(StopIteration):
+        next(stream)
+
+    finished = exporter.get_finished_spans()
+    assert first.type == "content_block_start"
+    assert len(finished) == 1
+    assert FR_STREAMING_TIME_TO_FIRST_TOKEN_MS not in finished[0].attributes
+    assert FR_STREAMING_TIME_TO_GENERATE_MS not in finished[0].attributes
+
+
 @pytest.mark.asyncio
 async def test_anthropic_async_stream_span_not_ended_before_last_item_consumed():
     """D-13: Async variant - span must not be ended until the consumer has processed the last pending item."""
@@ -444,3 +530,50 @@ async def test_anthropic_async_stream_span_not_ended_before_last_item_consumed()
 
     assert stream._instrumentation_completed
     assert len(exporter.get_finished_spans()) == 1
+
+
+@pytest.mark.asyncio
+async def test_anthropic_async_stream_sets_streaming_latency_span_attrs(monkeypatch):
+    clear_safety_handlers()
+    exporter, tracer = _test_tracer()
+    monkeypatch.setattr(Config, "enrich_token_usage", True)
+
+    timestamps = iter([201.1, 202.4])
+    monkeypatch.setattr(
+        "opentelemetry.instrumentation.anthropic.streaming.time.time",
+        lambda: next(timestamps),
+    )
+
+    span = tracer.start_span("anthropic.chat")
+    stream = AnthropicAsyncStream(
+        span,
+        _AsyncIterator(
+            [
+                SimpleNamespace(
+                    type="content_block_start",
+                    index=0,
+                    content_block=SimpleNamespace(type="text"),
+                ),
+                SimpleNamespace(
+                    type="content_block_delta",
+                    index=0,
+                    delta=SimpleNamespace(type="text_delta", text="hello"),
+                ),
+            ]
+        ),
+        SimpleNamespace(count_tokens=lambda text: len(text)),
+        200.0,
+        kwargs={},
+    )
+
+    first = await stream.__anext__()
+    second = await stream.__anext__()
+    with pytest.raises(StopAsyncIteration):
+        await stream.__anext__()
+
+    finished = exporter.get_finished_spans()
+    assert first.type == "content_block_start"
+    assert second.type == "content_block_delta"
+    assert len(finished) == 1
+    assert finished[0].attributes[FR_STREAMING_TIME_TO_FIRST_TOKEN_MS] == 1100
+    assert finished[0].attributes[FR_STREAMING_TIME_TO_GENERATE_MS] == 1300

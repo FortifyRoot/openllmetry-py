@@ -35,6 +35,58 @@ from wrapt import ObjectProxy
 
 logger = logging.getLogger(__name__)
 
+FR_STREAMING_TIME_TO_FIRST_TOKEN_MS = "fortifyroot.llm.streaming.time_to_first_token_ms"
+FR_STREAMING_TIME_TO_GENERATE_MS = "fortifyroot.llm.streaming.time_to_generate_ms"
+GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS = getattr(
+    SpanAttributes,
+    "GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS",
+    SpanAttributes.LLM_USAGE_CACHE_READ_INPUT_TOKENS,
+)
+GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS = getattr(
+    SpanAttributes,
+    "GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS",
+    SpanAttributes.LLM_USAGE_CACHE_CREATION_INPUT_TOKENS,
+)
+
+
+def _streaming_latency_ms(start_time, end_time):
+    return int(round((end_time - start_time) * 1000))
+
+
+def _is_streaming_token_item(item):
+    if getattr(item, "type", None) != "content_block_delta":
+        return False
+
+    delta = getattr(item, "delta", None)
+    delta_type = getattr(delta, "type", None)
+    if delta_type == "text_delta":
+        return bool(getattr(delta, "text", None))
+    if delta_type == "thinking_delta":
+        return bool(getattr(delta, "thinking", None))
+    if delta_type == "input_json_delta":
+        return bool(getattr(delta, "partial_json", None))
+    return False
+
+
+def _set_streaming_first_token_latency(span, start_time, first_token_time):
+    if not span or not span.is_recording():
+        return
+    set_span_attribute(
+        span,
+        FR_STREAMING_TIME_TO_FIRST_TOKEN_MS,
+        _streaming_latency_ms(start_time, first_token_time),
+    )
+
+
+def _set_streaming_time_to_generate(span, first_token_time, end_time):
+    if not first_token_time or not span or not span.is_recording():
+        return
+    set_span_attribute(
+        span,
+        FR_STREAMING_TIME_TO_GENERATE_MS,
+        _streaming_latency_ms(first_token_time, end_time),
+    )
+
 
 @dont_throw
 def _process_response_item(item, complete_response):
@@ -102,10 +154,10 @@ def _set_token_usage(
     set_span_attribute(span, SpanAttributes.LLM_USAGE_TOTAL_TOKENS, total_tokens)
 
     set_span_attribute(
-        span, SpanAttributes.GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS, cache_read_tokens
+        span, GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS, cache_read_tokens
     )
     set_span_attribute(
-        span, SpanAttributes.GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS, cache_creation_tokens
+        span, GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS, cache_creation_tokens
     )
 
     set_span_attribute(
@@ -182,6 +234,7 @@ class AnthropicStream(ObjectProxy):
 
         self._complete_response = {"events": [], "model": "", "usage": {}, "id": ""}
         self._instrumentation_completed = False
+        self._first_token_time = None
         self._pending_item = None  # FR: pending-item buffer for streaming safety
         self._streaming_safety = AnthropicStreamingSafety(span, getattr(span, "name", "anthropic.chat"))  # FR: streaming safety init
 
@@ -252,6 +305,13 @@ class AnthropicStream(ObjectProxy):
                 raise e
 
             item = self._streaming_safety.process_item(item)  # FR: streaming safety processing
+            if self._first_token_time is None and _is_streaming_token_item(item):
+                self._first_token_time = time.time()
+                _set_streaming_first_token_latency(
+                    self._span,
+                    self._start_time,
+                    self._first_token_time,
+                )
             if self._pending_item is None:  # FR: pending-item buffer logic
                 self._pending_item = item  # FR: pending-item buffer logic
                 continue  # FR: pending-item buffer logic
@@ -275,8 +335,14 @@ class AnthropicStream(ObjectProxy):
             GenAIAttributes.GEN_AI_RESPONSE_ID,
             self._complete_response.get("id"),
         )
+        end_time = time.time()
+        _set_streaming_time_to_generate(
+            self._span,
+            self._first_token_time,
+            end_time,
+        )
         if self._duration_histogram:
-            duration = time.time() - self._start_time
+            duration = end_time - self._start_time
             self._duration_histogram.record(
                 duration,
                 attributes=metric_attributes,
@@ -369,6 +435,7 @@ class AnthropicAsyncStream(ObjectProxy):
 
         self._complete_response = {"events": [], "model": "", "usage": {}, "id": ""}
         self._instrumentation_completed = False
+        self._first_token_time = None
         self._pending_item = None  # FR: pending-item buffer for streaming safety
         self._streaming_safety = AnthropicStreamingSafety(span, getattr(span, "name", "anthropic.chat"))  # FR: streaming safety init
 
@@ -442,6 +509,13 @@ class AnthropicAsyncStream(ObjectProxy):
                 raise
 
             item = self._streaming_safety.process_item(item)  # FR: streaming safety processing
+            if self._first_token_time is None and _is_streaming_token_item(item):
+                self._first_token_time = time.time()
+                _set_streaming_first_token_latency(
+                    self._span,
+                    self._start_time,
+                    self._first_token_time,
+                )
             if self._pending_item is None:  # FR: pending-item buffer logic
                 self._pending_item = item  # FR: pending-item buffer logic
                 continue  # FR: pending-item buffer logic
@@ -463,9 +537,15 @@ class AnthropicAsyncStream(ObjectProxy):
             request_model=self._kwargs.get("model"),
         )
         set_span_attribute(self._span, GenAIAttributes.GEN_AI_RESPONSE_ID, self._complete_response.get("id"))
+        end_time = time.time()
+        _set_streaming_time_to_generate(
+            self._span,
+            self._first_token_time,
+            end_time,
+        )
 
         if self._duration_histogram:
-            duration = time.time() - self._start_time
+            duration = end_time - self._start_time
             self._duration_histogram.record(
                 duration,
                 attributes=metric_attributes,
@@ -482,6 +562,7 @@ class AnthropicAsyncStream(ObjectProxy):
                 if usage := self._complete_response.get("usage"):
                     completion_tokens = usage.get("output_tokens", 0)
                 else:
+                    completion_tokens = 0
                     completion_content = ""
                     if self._complete_response.get("events"):
                         model_name = self._complete_response.get("model") or None
