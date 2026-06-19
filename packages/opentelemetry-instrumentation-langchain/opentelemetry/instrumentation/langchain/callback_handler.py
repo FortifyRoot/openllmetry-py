@@ -74,6 +74,11 @@ from opentelemetry.trace.span import Span
 from opentelemetry.trace.status import Status, StatusCode
 from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
 
+FR_STREAMING_TIME_TO_FIRST_TOKEN_MS = (
+    "fortifyroot.llm.streaming.time_to_first_token_ms"
+)
+FR_STREAMING_TIME_TO_GENERATE_MS = "fortifyroot.llm.streaming.time_to_generate_ms"
+
 
 def _extract_class_name_from_serialized(serialized: Optional[dict[str, Any]]) -> str:
     """
@@ -597,6 +602,38 @@ class TraceloopCallbackHandler(BaseCallbackHandler):
             set_llm_request(span, serialized, prompts, kwargs, self.spans[run_id])
 
     @dont_throw
+    def on_llm_new_token(
+        self,
+        token: str,
+        *,
+        run_id: UUID,
+        parent_run_id: Union[UUID, None] = None,
+        chunk: Union[GenerationChunk, ChatGenerationChunk, None] = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Run when a streaming LLM emits a new token."""
+        if context_api.get_value(_SUPPRESS_INSTRUMENTATION_KEY):
+            return
+        if not token and chunk is None:
+            return
+        if run_id not in self.spans:
+            return
+
+        span_holder = self.spans[run_id]
+        if span_holder.streaming_first_token_time is not None:
+            return
+
+        first_token_time = time.time()
+        span_holder.streaming_first_token_time = first_token_time
+        span = span_holder.span
+        if span.is_recording():
+            _set_span_attribute(
+                span,
+                FR_STREAMING_TIME_TO_FIRST_TOKEN_MS,
+                round((first_token_time - span_holder.start_time) * 1000),
+            )
+
+    @dont_throw
     def on_llm_end(
         self,
         response: LLMResult,
@@ -698,7 +735,15 @@ class TraceloopCallbackHandler(BaseCallbackHandler):
             set_chat_response(span, response)
 
         # Record duration before ending span
-        duration = time.time() - self.spans[run_id].start_time
+        end_time = time.time()
+        streaming_first_token_time = self.spans[run_id].streaming_first_token_time
+        if streaming_first_token_time is not None and span.is_recording():
+            _set_span_attribute(
+                span,
+                FR_STREAMING_TIME_TO_GENERATE_MS,
+                round((end_time - streaming_first_token_time) * 1000),
+            )
+        duration = end_time - self.spans[run_id].start_time
         vendor = span.attributes.get(GenAIAttributes.GEN_AI_SYSTEM, "Langchain")
         self.duration_histogram.record(
             duration,
