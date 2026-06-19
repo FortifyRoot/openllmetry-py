@@ -13,6 +13,8 @@ from opentelemetry.instrumentation.bedrock.reusable_streaming_body import (
 )
 from opentelemetry.instrumentation.bedrock.streaming_safety import (
     BedrockConverseSafetyStream,
+    FR_STREAMING_TIME_TO_FIRST_TOKEN_MS,
+    FR_STREAMING_TIME_TO_GENERATE_MS,
     _BedrockChunkStreamingSafety,
     _BedrockConverseStreamingSafety,
     _decode_chunk_event,
@@ -402,6 +404,52 @@ def test_invoke_streaming_wrapper_masks_chunk_bytes_and_accumulates_masked_body(
     assert completed == [{"outputText": "masked-atail"}]
 
 
+def test_invoke_streaming_wrapper_sets_latency_span_attrs(monkeypatch):
+    exporter, tracer = _test_span()
+    register_completion_safety_stream_factory(
+        lambda _: _FakeStreamSession(["a"], flush_result="")
+    )
+    ticks = iter([100.125, 101.250])
+    monkeypatch.setattr(
+        "opentelemetry.instrumentation.bedrock.streaming_safety.time.time",
+        lambda: next(ticks),
+    )
+
+    event = {
+        "chunk": {
+            "bytes": json.dumps(
+                {"contentBlockDelta": {"delta": {"text": "a"}}}
+            ).encode("utf-8")
+        }
+    }
+    with tracer.start_as_current_span("bedrock.completion") as span:
+        wrapper = create_invoke_stream_wrapper(
+            [event],
+            span=span,
+            stream_start_time=100.0,
+        )
+        list(wrapper)
+
+    attrs = exporter.get_finished_spans()[0].attributes
+    assert attrs[FR_STREAMING_TIME_TO_FIRST_TOKEN_MS] == 125
+    assert attrs[FR_STREAMING_TIME_TO_GENERATE_MS] == 1125
+
+
+def test_invoke_streaming_wrapper_omits_latency_attrs_for_empty_stream():
+    exporter, tracer = _test_span()
+    with tracer.start_as_current_span("bedrock.completion") as span:
+        wrapper = create_invoke_stream_wrapper(
+            [],
+            span=span,
+            stream_start_time=100.0,
+        )
+        list(wrapper)
+
+    attrs = exporter.get_finished_spans()[0].attributes
+    assert FR_STREAMING_TIME_TO_FIRST_TOKEN_MS not in attrs
+    assert FR_STREAMING_TIME_TO_GENERATE_MS not in attrs
+
+
 def test_converse_streaming_wrapper_masks_deltas_before_span_attributes():
     exporter, tracer = _test_span()
     register_completion_safety_stream_factory(
@@ -439,6 +487,66 @@ def test_converse_streaming_wrapper_masks_deltas_before_span_attributes():
         finished_span.attributes["gen_ai.completion.0.content"]
         == "masked-atail"
     )
+
+
+def test_converse_streaming_wrapper_sets_latency_span_attrs(monkeypatch):
+    exporter, tracer = _test_span()
+    register_completion_safety_stream_factory(
+        lambda _: _FakeStreamSession(["a"], flush_result="")
+    )
+    ticks = iter([200.050, 200.900])
+    monkeypatch.setattr(
+        "opentelemetry.instrumentation.bedrock.streaming_safety.time.time",
+        lambda: next(ticks),
+    )
+
+    events = [
+        {"messageStart": {"role": "assistant"}},
+        {"contentBlockDelta": {"delta": {"text": "a"}}},
+        {"metadata": {"usage": {"inputTokens": 1, "outputTokens": 1}}},
+    ]
+    span = tracer.start_span("bedrock.converse")
+    wrapper = create_converse_stream_wrapper(
+        events,
+        span=span,
+        provider="AWS",
+        model="demo",
+        metric_params=SimpleNamespace(
+            guardrail_activation=SimpleNamespace(add=lambda *args, **kwargs: None),
+            token_histogram=None,
+            duration_histogram=None,
+            vendor="AWS",
+            model="demo",
+            is_stream=True,
+            start_time=0.0,
+        ),
+        event_logger=None,
+        stream_start_time=200.0,
+    )
+    list(wrapper)
+
+    attrs = exporter.get_finished_spans()[0].attributes
+    assert attrs[FR_STREAMING_TIME_TO_FIRST_TOKEN_MS] == 50
+    assert attrs[FR_STREAMING_TIME_TO_GENERATE_MS] == 850
+
+
+def test_converse_streaming_wrapper_omits_latency_attrs_for_empty_stream():
+    exporter, tracer = _test_span()
+    span = tracer.start_span("bedrock.converse")
+    wrapper = create_converse_stream_wrapper(
+        [],
+        span=span,
+        provider="AWS",
+        model="demo",
+        metric_params=SimpleNamespace(),
+        event_logger=None,
+        stream_start_time=200.0,
+    )
+    list(wrapper)
+
+    attrs = exporter.get_finished_spans()[0].attributes
+    assert FR_STREAMING_TIME_TO_FIRST_TOKEN_MS not in attrs
+    assert FR_STREAMING_TIME_TO_GENERATE_MS not in attrs
 
 
 def test_bedrock_chunk_streaming_safety_covers_payload_variants_and_helpers():
