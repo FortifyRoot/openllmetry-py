@@ -41,6 +41,8 @@ from opentelemetry.instrumentation.llamaindex.safety import (
     uninstrument_llm_safety_wrappers,
 )
 from opentelemetry.instrumentation.llamaindex.streaming_safety import (
+    FR_STREAMING_TIME_TO_FIRST_TOKEN_MS,
+    FR_STREAMING_TIME_TO_GENERATE_MS,
     LlamaIndexStreamingSafety,
     make_async_stream,
     wrap_stream,
@@ -203,6 +205,27 @@ class TestWrapStream:
         result = list(wrap_stream(iter(responses), safety))
         assert len(result) == 5
 
+    def test_streaming_latency_hooks_fire_for_output_deltas(self):
+        """TTFT is first output chunk; STTG is stream exhaustion after first output."""
+        responses = [_chat_response("a"), _chat_response("b")]
+        safety = _mock_safety(flush_return="")
+
+        result = list(wrap_stream(iter(responses), safety))
+
+        assert [r.delta for r in result] == ["a", "b"]
+        assert safety.record_first_token.call_count == 2
+        safety.record_completion.assert_called_once()
+
+    def test_streaming_latency_hooks_skip_empty_delta_stream(self):
+        responses = [_chat_response(None), _chat_response("")]
+        safety = _mock_safety(flush_return="")
+
+        result = list(wrap_stream(iter(responses), safety))
+
+        assert len(result) == 2
+        safety.record_first_token.assert_not_called()
+        safety.record_completion.assert_called_once()
+
 
 # ===========================================================================
 # streaming_safety.py: make_async_stream
@@ -264,6 +287,20 @@ class TestMakeAsyncStream:
         result = [r async for r in make_async_stream(_source(), safety)]
         assert result == []
         safety.flush.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_streaming_latency_hooks_fire_for_output_deltas(self):
+        async def _source():
+            yield _chat_response("a")
+            yield _chat_response("b")
+
+        safety = _mock_safety(flush_return="")
+
+        result = [r async for r in make_async_stream(_source(), safety)]
+
+        assert [r.delta for r in result] == ["a", "b"]
+        assert safety.record_first_token.call_count == 2
+        safety.record_completion.assert_called_once()
 
 
 # ===========================================================================
@@ -664,3 +701,39 @@ class TestLlamaIndexStreamingSafety:
 
             safety = LlamaIndexStreamingSafety(span, "test.stream", "CHAT")
             assert safety.flush() == ""
+
+    def test_streaming_latency_span_attrs_are_recorded_as_ms(self, monkeypatch):
+        span = MagicMock()
+        span.is_recording.return_value = True
+        ticks = iter([10.0, 10.125, 11.25])
+        monkeypatch.setattr(
+            "opentelemetry.instrumentation.llamaindex.streaming_safety.time.perf_counter",
+            lambda: next(ticks),
+        )
+        with patch(
+            "opentelemetry.instrumentation.llamaindex.streaming_safety.CompletionTextStreamGroup",
+            autospec=True,
+        ):
+            safety = LlamaIndexStreamingSafety(span, "test.stream", "COMPLETION")
+            safety.record_first_token()
+            safety.record_first_token()
+            safety.record_completion()
+
+        span.set_attribute.assert_any_call(FR_STREAMING_TIME_TO_FIRST_TOKEN_MS, 125)
+        span.set_attribute.assert_any_call(FR_STREAMING_TIME_TO_GENERATE_MS, 1125)
+
+    def test_streaming_latency_span_attrs_skip_empty_stream(self, monkeypatch):
+        span = MagicMock()
+        span.is_recording.return_value = True
+        monkeypatch.setattr(
+            "opentelemetry.instrumentation.llamaindex.streaming_safety.time.perf_counter",
+            lambda: 10.0,
+        )
+        with patch(
+            "opentelemetry.instrumentation.llamaindex.streaming_safety.CompletionTextStreamGroup",
+            autospec=True,
+        ):
+            safety = LlamaIndexStreamingSafety(span, "test.stream", "COMPLETION")
+            safety.record_completion()
+
+        span.set_attribute.assert_not_called()
