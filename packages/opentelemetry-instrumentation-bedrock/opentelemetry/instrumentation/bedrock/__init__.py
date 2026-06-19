@@ -263,9 +263,12 @@ def _instrumented_model_invoke_with_response_stream(
         # the response stream is fully consumed (which is why
         # ``start_as_current_span`` cannot be used directly).
         kwargs = _apply_invoke_prompt_safety(span, kwargs, _BEDROCK_INVOKE_SPAN_NAME)
+        stream_start_time = time.time()
         with trace.use_span(span, end_on_exit=False):
             response = fn(*args, **kwargs)
-        _handle_stream_call(span, kwargs, response, metric_params, event_logger)
+        _handle_stream_call(
+            span, kwargs, response, metric_params, event_logger, stream_start_time
+        )
 
         return response
 
@@ -303,10 +306,13 @@ def _instrumented_converse_stream(fn, tracer, metric_params, event_logger):
         kwargs = _apply_converse_prompt_safety(span, kwargs, _BEDROCK_CONVERSE_SPAN_NAME)
         # ST-10.4: see _instrumented_model_invoke_with_response_stream
         # for the rationale on use_span(end_on_exit=False).
+        stream_start_time = time.time()
         with trace.use_span(span, end_on_exit=False):
             response = fn(*args, **kwargs)
         if span.is_recording():
-            _handle_converse_stream(span, kwargs, response, metric_params, event_logger)
+            _handle_converse_stream(
+                span, kwargs, response, metric_params, event_logger, stream_start_time
+            )
 
         return response
 
@@ -314,7 +320,9 @@ def _instrumented_converse_stream(fn, tracer, metric_params, event_logger):
 
 
 @dont_throw
-def _handle_stream_call(span, kwargs, response, metric_params, event_logger):
+def _handle_stream_call(
+    span, kwargs, response, metric_params, event_logger, stream_start_time
+):
 
     (provider, model_vendor, model) = _get_vendor_model(kwargs.get("modelId"))
     request_body = json.loads(kwargs.get("body"))
@@ -358,6 +366,7 @@ def _handle_stream_call(span, kwargs, response, metric_params, event_logger):
         StreamingWrapper(response["body"]),
         span=span,
         stream_done_callback=stream_done,
+        stream_start_time=stream_start_time,
     )
 
 
@@ -427,7 +436,9 @@ def _handle_converse(span, kwargs, response, metric_params, event_logger):
 
 
 @dont_throw
-def _handle_converse_stream(span, kwargs, response, metric_params, event_logger):
+def _handle_converse_stream(
+    span, kwargs, response, metric_params, event_logger, stream_start_time
+):
     (provider, model_vendor, model) = _get_vendor_model(kwargs.get("modelId"))
 
     set_converse_model_span_attributes(span, provider, model, kwargs)
@@ -446,6 +457,7 @@ def _handle_converse_stream(span, kwargs, response, metric_params, event_logger)
             model=model,
             metric_params=metric_params,
             event_logger=event_logger,
+            stream_start_time=stream_start_time,
         )
 
 

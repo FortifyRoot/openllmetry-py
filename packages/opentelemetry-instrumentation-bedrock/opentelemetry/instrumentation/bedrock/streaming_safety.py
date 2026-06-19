@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 
 from wrapt import ObjectProxy
 
@@ -18,6 +19,10 @@ from opentelemetry.instrumentation.fortifyroot.text_streaming import (
     CompletionTextStreamGroup,
 )
 from opentelemetry.semconv_ai import LLMRequestTypeValues
+
+
+FR_STREAMING_TIME_TO_FIRST_TOKEN_MS = "fortifyroot.llm.streaming.time_to_first_token_ms"
+FR_STREAMING_TIME_TO_GENERATE_MS = "fortifyroot.llm.streaming.time_to_generate_ms"
 
 
 class _BedrockChunkStreamingSafety:
@@ -144,12 +149,17 @@ class _BedrockChunkStreamingSafety:
 
 
 class BedrockInvokeSafetyStreamingWrapper(ObjectProxy):
-    def __init__(self, response, *, span, stream_done_callback=None):
+    def __init__(self, response, *, span, stream_done_callback=None, stream_start_time=None):
         super().__init__(response)
 
+        self._self_span = span
         self._self_stream_done_callback = stream_done_callback
         self._self_accumulating_body = {}
         self._self_pending_event = None
+        self._self_stream_start_time = (
+            time.time() if stream_start_time is None else stream_start_time
+        )
+        self._self_first_token_time = None
         self._self_streaming_safety = _BedrockChunkStreamingSafety(
             span=span,
             span_name=getattr(span, "name", "bedrock.completion"),
@@ -173,6 +183,7 @@ class BedrockInvokeSafetyStreamingWrapper(ObjectProxy):
             self._accumulate_event(self._self_pending_event)
             yield self._self_pending_event
 
+        self._finish_streaming_latency()
         if self._self_stream_done_callback:
             self._self_stream_done_callback(self._self_accumulating_body)
 
@@ -180,6 +191,8 @@ class BedrockInvokeSafetyStreamingWrapper(ObjectProxy):
         payload = _decode_chunk_event(event)
         if not isinstance(payload, dict):
             return
+
+        self._observe_streaming_text(self._self_streaming_safety._payload_text(payload))
 
         event_type = payload.get("type")
         if event_type is None:
@@ -216,6 +229,25 @@ class BedrockInvokeSafetyStreamingWrapper(ObjectProxy):
                 self._self_accumulating_body[key] += value
             else:
                 self._self_accumulating_body[key] = value
+
+    def _observe_streaming_text(self, text):
+        if not isinstance(text, str) or not text or self._self_first_token_time is not None:
+            return
+        now = time.time()
+        self._self_first_token_time = now
+        if self._self_span.is_recording():
+            self._self_span.set_attribute(
+                FR_STREAMING_TIME_TO_FIRST_TOKEN_MS,
+                round((now - self._self_stream_start_time) * 1000),
+            )
+
+    def _finish_streaming_latency(self):
+        if self._self_first_token_time is None or not self._self_span.is_recording():
+            return
+        self._self_span.set_attribute(
+            FR_STREAMING_TIME_TO_GENERATE_MS,
+            round((time.time() - self._self_first_token_time) * 1000),
+        )
 
 
 class _BedrockConverseStreamingSafety:
@@ -321,6 +353,7 @@ class BedrockConverseSafetyStream(ObjectProxy):
         model,
         metric_params,
         event_logger,
+        stream_start_time=None,
     ):
         super().__init__(response)
 
@@ -333,6 +366,10 @@ class BedrockConverseSafetyStream(ObjectProxy):
         self._self_role = "unknown"
         self._self_response_msg = []
         self._self_span_ended = False
+        self._self_stream_start_time = (
+            time.time() if stream_start_time is None else stream_start_time
+        )
+        self._self_first_token_time = None
         self._self_streaming_safety = _BedrockConverseStreamingSafety(
             span=span,
             span_name=getattr(span, "name", "bedrock.converse"),
@@ -356,6 +393,7 @@ class BedrockConverseSafetyStream(ObjectProxy):
             yield self._self_pending_event
 
         if not self._self_span_ended:
+            self._finish_streaming_latency()
             self._self_span.end()
             self._self_span_ended = True
 
@@ -369,10 +407,12 @@ class BedrockConverseSafetyStream(ObjectProxy):
         if "contentBlockDelta" in event:
             delta_text = ((event.get("contentBlockDelta") or {}).get("delta") or {}).get("text")
             if isinstance(delta_text, str):
+                self._observe_streaming_text(delta_text)
                 self._self_response_msg.append(delta_text)
         elif "contentBlockStart" in event:
             start_text = ((event.get("contentBlockStart") or {}).get("start") or {}).get("text")
             if isinstance(start_text, str):
+                self._observe_streaming_text(start_text)
                 self._self_response_msg.append(start_text)
 
         if "messageStop" in event:
@@ -402,15 +442,38 @@ class BedrockConverseSafetyStream(ObjectProxy):
             )
             converse_usage_record(self._self_span, metadata, self._self_metric_params)
             if not self._self_span_ended:
+                self._finish_streaming_latency()
                 self._self_span.end()
                 self._self_span_ended = True
 
+    def _observe_streaming_text(self, text):
+        if not isinstance(text, str) or not text or self._self_first_token_time is not None:
+            return
+        now = time.time()
+        self._self_first_token_time = now
+        if self._self_span.is_recording():
+            self._self_span.set_attribute(
+                FR_STREAMING_TIME_TO_FIRST_TOKEN_MS,
+                round((now - self._self_stream_start_time) * 1000),
+            )
 
-def create_invoke_stream_wrapper(response, *, span, stream_done_callback=None):
+    def _finish_streaming_latency(self):
+        if self._self_first_token_time is None or not self._self_span.is_recording():
+            return
+        self._self_span.set_attribute(
+            FR_STREAMING_TIME_TO_GENERATE_MS,
+            round((time.time() - self._self_first_token_time) * 1000),
+        )
+
+
+def create_invoke_stream_wrapper(
+    response, *, span, stream_done_callback=None, stream_start_time=None
+):
     return BedrockInvokeSafetyStreamingWrapper(
         response,
         span=span,
         stream_done_callback=stream_done_callback,
+        stream_start_time=stream_start_time,
     )
 
 
@@ -422,6 +485,7 @@ def create_converse_stream_wrapper(
     model,
     metric_params,
     event_logger,
+    stream_start_time=None,
 ):
     return BedrockConverseSafetyStream(
         response,
@@ -430,6 +494,7 @@ def create_converse_stream_wrapper(
         model=model,
         metric_params=metric_params,
         event_logger=event_logger,
+        stream_start_time=stream_start_time,
     )
 
 
