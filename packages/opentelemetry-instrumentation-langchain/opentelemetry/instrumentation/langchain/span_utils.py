@@ -40,6 +40,7 @@ class SpanHolder:
     entity_path: str
     start_time: float = field(default_factory=time.time)
     request_model: Optional[str] = None
+    streaming_first_token_time: Optional[float] = None
     # ST-10 review-round-2 fix (2026-05-11): every context_api.attach()
     # performed for this span — span-context, suppression, metadata
     # association_properties — appended here in attach order. ``_end_span``
