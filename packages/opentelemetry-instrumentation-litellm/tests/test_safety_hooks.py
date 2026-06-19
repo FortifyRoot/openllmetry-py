@@ -32,7 +32,10 @@ from opentelemetry.instrumentation.litellm.safety import (
     _resolve_masked_text,
 )
 from opentelemetry.instrumentation.litellm.streaming_safety import (
+    FR_STREAMING_TIME_TO_FIRST_TOKEN_MS,
+    FR_STREAMING_TIME_TO_GENERATE_MS,
     _accumulate_streaming_chunk,
+    _chunk_has_output_text,
     _mask_streaming_chunk,
     is_async_streaming_response,
     is_sync_streaming_response,
@@ -647,7 +650,10 @@ def test_safety_helpers_cover_args_blocks_and_text_extraction():
         None, args, {}, "chat", "litellm.completion"
     )
     assert unchanged_kwargs == {}
-    assert updated_args[1][0]["content"][:2] == ["[MASKED:prompt-a]", {"type": "input_text", "text": "[MASKED:prompt-b]"}]
+    assert updated_args[1][0]["content"][:2] == [
+        "[MASKED:prompt-a]",
+        {"type": "input_text", "text": "[MASKED:prompt-b]"},
+    ]
     assert _get_messages(updated_args, {})[1] == "args"
     assert apply_prompt_safety(None, (), {"messages": "invalid"}, "chat", "litellm.completion") == (
         (),
@@ -731,6 +737,122 @@ def test_streaming_helper_units_cover_text_mirroring_usage_and_detector_helpers(
 
     assert is_async_streaming_response({"stream": True}, _agen()) is True
     assert is_async_streaming_response({}, _agen()) is False
+
+
+def test_streaming_chunk_output_detection_handles_delta_message_and_text():
+    assert _chunk_has_output_text(
+        SimpleNamespace(
+            choices=[SimpleNamespace(delta=SimpleNamespace(content="hello"))]
+        )
+    )
+    assert _chunk_has_output_text(
+        SimpleNamespace(
+            choices=[
+                SimpleNamespace(message=SimpleNamespace(content="hello"))
+            ]
+        )
+    )
+    assert _chunk_has_output_text(
+        SimpleNamespace(choices=[SimpleNamespace(text="hello")])
+    )
+    assert not _chunk_has_output_text(
+        SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    delta=SimpleNamespace(role="assistant", content="")
+                )
+            ]
+        )
+    )
+
+
+def test_sync_streaming_wrapper_sets_streaming_latency_attrs():
+    exporter, tracer = _test_tracer()
+    span = tracer.start_span("litellm.completion")
+    chunks = [
+        SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    delta=SimpleNamespace(role="assistant", content="")
+                )
+            ]
+        ),
+        SimpleNamespace(
+            choices=[SimpleNamespace(delta=SimpleNamespace(content="hello"))]
+        ),
+    ]
+
+    with patch(
+        "opentelemetry.instrumentation.litellm.streaming_safety.time.time",
+        side_effect=[100.0, 100.25, 100.9],
+    ):
+        list(
+            wrap_sync_streaming_response(
+                span,
+                iter(chunks),
+                "chat",
+                "litellm.completion",
+                lambda *_: None,
+            )
+        )
+
+    attrs = exporter.get_finished_spans()[0].attributes
+    assert attrs[FR_STREAMING_TIME_TO_FIRST_TOKEN_MS] == 250
+    assert attrs[FR_STREAMING_TIME_TO_GENERATE_MS] == 650
+
+
+@pytest.mark.asyncio
+async def test_async_streaming_wrapper_sets_streaming_latency_attrs():
+    exporter, tracer = _test_tracer()
+    span = tracer.start_span("litellm.completion")
+
+    async def _response():
+        yield SimpleNamespace(
+            choices=[SimpleNamespace(delta=SimpleNamespace(content="hello"))]
+        )
+
+    with patch(
+        "opentelemetry.instrumentation.litellm.streaming_safety.time.time",
+        side_effect=[200.0, 200.125, 200.5],
+    ):
+        yielded = [
+            chunk
+            async for chunk in wrap_async_streaming_response(
+                span,
+                _response(),
+                "chat",
+                "litellm.completion",
+                lambda *_: None,
+            )
+        ]
+
+    assert len(yielded) == 1
+    attrs = exporter.get_finished_spans()[0].attributes
+    assert attrs[FR_STREAMING_TIME_TO_FIRST_TOKEN_MS] == 125
+    assert attrs[FR_STREAMING_TIME_TO_GENERATE_MS] == 375
+
+
+def test_streaming_wrapper_leaves_latency_attrs_unset_for_empty_stream():
+    exporter, tracer = _test_tracer()
+    span = tracer.start_span("litellm.completion")
+
+    with patch(
+        "opentelemetry.instrumentation.litellm.streaming_safety.time.time",
+        side_effect=[300.0],
+    ):
+        list(
+            wrap_sync_streaming_response(
+                span,
+                iter(()),
+                "chat",
+                "litellm.completion",
+                lambda *_: None,
+            )
+        )
+
+    attrs = exporter.get_finished_spans()[0].attributes
+    assert FR_STREAMING_TIME_TO_FIRST_TOKEN_MS not in attrs
+    assert FR_STREAMING_TIME_TO_GENERATE_MS not in attrs
 
 
 def test_set_request_attributes_does_not_treat_text_prompt_as_model():
