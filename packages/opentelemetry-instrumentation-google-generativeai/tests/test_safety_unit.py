@@ -8,6 +8,10 @@ from opentelemetry.instrumentation.google_generativeai.streaming_runtime import 
     build_async_streaming_response_delegate,
     build_streaming_response_delegate,
 )
+from opentelemetry.instrumentation.google_generativeai.streaming_safety import (
+    FR_STREAMING_TIME_TO_FIRST_TOKEN_MS,
+    FR_STREAMING_TIME_TO_GENERATE_MS,
+)
 from opentelemetry.sdk.trace import TracerProvider
 
 
@@ -168,6 +172,77 @@ def test_streaming_runtime_delegate_masks_chunk_and_finalizes(monkeypatch):
     clear_completion_safety_stream_factory()
 
 
+def test_streaming_runtime_delegate_sets_latency_span_attrs(monkeypatch):
+    from opentelemetry.instrumentation import google_generativeai as google_module
+    from opentelemetry.instrumentation.fortifyroot import (
+        clear_completion_safety_stream_factory,
+        register_completion_safety_stream_factory,
+    )
+    from opentelemetry.instrumentation.google_generativeai import streaming_safety
+
+    clear_completion_safety_stream_factory()
+    register_completion_safety_stream_factory(lambda _: _FakeStreamSession(["token"]))
+    ticks = iter([11.25, 13.0])
+    monkeypatch.setattr(streaming_safety.time, "perf_counter", lambda: next(ticks))
+    monkeypatch.setattr(google_module, "should_emit_events", lambda: False)
+    monkeypatch.setattr(google_module, "set_response_attributes", lambda *args: None)
+    monkeypatch.setattr(google_module, "set_model_response_attributes", lambda *args: None)
+
+    tracer = TracerProvider().get_tracer(__name__)
+    span = tracer.start_span("gemini.generate_content")
+    response = [
+        SimpleNamespace(
+            text="raw",
+            candidates=[
+                SimpleNamespace(
+                    content=SimpleNamespace(parts=[SimpleNamespace(text="secret")])
+                )
+            ],
+        )
+    ]
+
+    list(
+        build_streaming_response_delegate(
+            span,
+            response,
+            "gemini-1.5",
+            event_logger=None,
+            token_histogram=None,
+            start_time=10.0,
+        )
+    )
+
+    assert span.attributes[FR_STREAMING_TIME_TO_FIRST_TOKEN_MS] == 1250
+    assert span.attributes[FR_STREAMING_TIME_TO_GENERATE_MS] == 1750
+
+    clear_completion_safety_stream_factory()
+
+
+def test_streaming_runtime_delegate_leaves_empty_stream_latency_unset(monkeypatch):
+    from opentelemetry.instrumentation import google_generativeai as google_module
+
+    monkeypatch.setattr(google_module, "should_emit_events", lambda: False)
+    monkeypatch.setattr(google_module, "set_response_attributes", lambda *args: None)
+    monkeypatch.setattr(google_module, "set_model_response_attributes", lambda *args: None)
+
+    tracer = TracerProvider().get_tracer(__name__)
+    span = tracer.start_span("gemini.generate_content")
+
+    list(
+        build_streaming_response_delegate(
+            span,
+            [],
+            "gemini-1.5",
+            event_logger=None,
+            token_histogram=None,
+            start_time=10.0,
+        )
+    )
+
+    assert FR_STREAMING_TIME_TO_FIRST_TOKEN_MS not in span.attributes
+    assert FR_STREAMING_TIME_TO_GENERATE_MS not in span.attributes
+
+
 @pytest.mark.asyncio
 async def test_async_streaming_runtime_delegate_masks_chunk_and_finalizes(monkeypatch):
     from opentelemetry.instrumentation import google_generativeai as google_module
@@ -227,5 +302,53 @@ async def test_async_streaming_runtime_delegate_masks_chunk_and_finalizes(monkey
         ("model", "maskedtail", "gemini-1.5"),
     ]
     assert not span.is_recording()
+
+    clear_completion_safety_stream_factory()
+
+
+@pytest.mark.asyncio
+async def test_async_streaming_runtime_delegate_sets_latency_span_attrs(monkeypatch):
+    from opentelemetry.instrumentation import google_generativeai as google_module
+    from opentelemetry.instrumentation.fortifyroot import (
+        clear_completion_safety_stream_factory,
+        register_completion_safety_stream_factory,
+    )
+    from opentelemetry.instrumentation.google_generativeai import streaming_safety
+
+    clear_completion_safety_stream_factory()
+    register_completion_safety_stream_factory(lambda _: _FakeStreamSession(["token"]))
+    ticks = iter([21.1, 22.4])
+    monkeypatch.setattr(streaming_safety.time, "perf_counter", lambda: next(ticks))
+    monkeypatch.setattr(google_module, "should_emit_events", lambda: False)
+    monkeypatch.setattr(google_module, "set_response_attributes", lambda *args: None)
+    monkeypatch.setattr(google_module, "set_model_response_attributes", lambda *args: None)
+
+    async def _response():
+        yield SimpleNamespace(
+            text="raw",
+            candidates=[
+                SimpleNamespace(
+                    content=SimpleNamespace(parts=[SimpleNamespace(text="secret")])
+                )
+            ],
+        )
+
+    tracer = TracerProvider().get_tracer(__name__)
+    span = tracer.start_span("gemini.generate_content")
+    yielded = [
+        item
+        async for item in build_async_streaming_response_delegate(
+            span,
+            _response(),
+            "gemini-1.5",
+            event_logger=None,
+            token_histogram=None,
+            start_time=20.0,
+        )
+    ]
+
+    assert yielded[0].text == "token"
+    assert span.attributes[FR_STREAMING_TIME_TO_FIRST_TOKEN_MS] == 1100
+    assert span.attributes[FR_STREAMING_TIME_TO_GENERATE_MS] == 1300
 
     clear_completion_safety_stream_factory()
