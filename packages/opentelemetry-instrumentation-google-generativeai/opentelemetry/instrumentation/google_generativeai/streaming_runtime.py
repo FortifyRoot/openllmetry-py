@@ -6,7 +6,9 @@ from opentelemetry.instrumentation.google_generativeai.streaming_safety import (
 )
 
 
-def build_streaming_response_delegate(span, response, llm_model, event_logger, token_histogram):
+def build_streaming_response_delegate(
+    span, response, llm_model, event_logger, token_histogram, start_time=None
+):
     from opentelemetry.instrumentation.google_generativeai import (
         emit_choice_events,
         set_model_response_attributes,
@@ -31,11 +33,12 @@ def build_streaming_response_delegate(span, response, llm_model, event_logger, t
         span=span,
         llm_model=llm_model,
         finalize_response=finalize_response,
+        start_time=start_time,
     )
 
 
 async def build_async_streaming_response_delegate(
-    span, response, llm_model, event_logger, token_histogram
+    span, response, llm_model, event_logger, token_histogram, start_time=None
 ):
     from opentelemetry.instrumentation.google_generativeai import (
         emit_choice_events,
@@ -61,5 +64,6 @@ async def build_async_streaming_response_delegate(
         span=span,
         llm_model=llm_model,
         finalize_response=finalize_response,
+        start_time=start_time,
     ):
         yield item

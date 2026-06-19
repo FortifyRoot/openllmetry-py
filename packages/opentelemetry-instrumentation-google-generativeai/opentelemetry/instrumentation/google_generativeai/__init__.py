@@ -257,11 +257,11 @@ async def _awrap(
     if response:
         if is_streaming_response(response):
             return _build_from_streaming_response(
-                span, response, llm_model, event_logger, token_histogram
+                span, response, llm_model, event_logger, token_histogram, start_time
             )
         elif is_async_streaming_response(response):
             return _abuild_from_streaming_response(
-                span, response, llm_model, event_logger, token_histogram
+                span, response, llm_model, event_logger, token_histogram, start_time
             )
         else:
             await asyncio.to_thread(
@@ -343,11 +343,11 @@ def _wrap(
     if response:
         if is_streaming_response(response):
             return _build_from_streaming_response(
-                span, response, llm_model, event_logger, token_histogram
+                span, response, llm_model, event_logger, token_histogram, start_time
             )
         elif is_async_streaming_response(response):
             return _abuild_from_streaming_response(
-                span, response, llm_model, event_logger, token_histogram
+                span, response, llm_model, event_logger, token_histogram, start_time
             )
         else:
             _apply_completion_safety(span, response, name, response_model=llm_model)
