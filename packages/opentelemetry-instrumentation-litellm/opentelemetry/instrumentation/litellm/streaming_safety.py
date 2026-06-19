@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import time
 from types import SimpleNamespace
 
 from opentelemetry import context as context_api
@@ -11,7 +12,9 @@ from opentelemetry.instrumentation.fortifyroot.text_streaming import (
     CompletionTextStreamGroup,
 )
 from opentelemetry.instrumentation.litellm.safety import PROVIDER, extract_text_content
-from opentelemetry.semconv_ai import SpanAttributes
+
+FR_STREAMING_TIME_TO_FIRST_TOKEN_MS = "fortifyroot.llm.streaming.time_to_first_token_ms"
+FR_STREAMING_TIME_TO_GENERATE_MS = "fortifyroot.llm.streaming.time_to_generate_ms"
 
 
 def is_sync_streaming_response(kwargs, response) -> bool:
@@ -50,12 +53,27 @@ def wrap_sync_streaming_response(span, response, request_type, span_name, set_re
         request_type=request_type,
     )
     complete_response = {"choices": [], "model": None, "usage": None}
+    stream_started_at = time.time()
+    first_token_at = None
 
     try:
         for chunk in response:
             _mask_streaming_chunk(streams, chunk)
             _accumulate_streaming_chunk(complete_response, chunk)
+            if first_token_at is None and _chunk_has_output_text(chunk):
+                first_token_at = time.time()
+                _set_streaming_latency_attr(
+                    span,
+                    FR_STREAMING_TIME_TO_FIRST_TOKEN_MS,
+                    first_token_at - stream_started_at,
+                )
             yield chunk
+        if first_token_at is not None:
+            _set_streaming_latency_attr(
+                span,
+                FR_STREAMING_TIME_TO_GENERATE_MS,
+                time.time() - first_token_at,
+            )
         _finalize_streaming_span(span, complete_response, set_response_attributes)
     except Exception as exc:
         _close_streaming_response(response)
@@ -88,12 +106,27 @@ async def wrap_async_streaming_response(
         request_type=request_type,
     )
     complete_response = {"choices": [], "model": None, "usage": None}
+    stream_started_at = time.time()
+    first_token_at = None
 
     try:
         async for chunk in response:
             _mask_streaming_chunk(streams, chunk)
             _accumulate_streaming_chunk(complete_response, chunk)
+            if first_token_at is None and _chunk_has_output_text(chunk):
+                first_token_at = time.time()
+                _set_streaming_latency_attr(
+                    span,
+                    FR_STREAMING_TIME_TO_FIRST_TOKEN_MS,
+                    first_token_at - stream_started_at,
+                )
             yield chunk
+        if first_token_at is not None:
+            _set_streaming_latency_attr(
+                span,
+                FR_STREAMING_TIME_TO_GENERATE_MS,
+                time.time() - first_token_at,
+            )
         _finalize_streaming_span(span, complete_response, set_response_attributes)
     except Exception as exc:
         await _aclose_streaming_response(response)
@@ -213,3 +246,28 @@ async def _aclose_streaming_response(response) -> None:
     aclose = getattr(response, "aclose", None)
     if callable(aclose):
         await aclose()
+
+
+def _set_streaming_latency_attr(span, key: str, seconds: float) -> None:
+    if span.is_recording():
+        span.set_attribute(key, int(round(seconds * 1000)))
+
+
+def _chunk_has_output_text(chunk) -> bool:
+    for choice in get_object_value(chunk, "choices") or []:
+        if _value_has_text(get_object_value(choice, "text")):
+            return True
+        if _value_has_text(get_object_value(choice, "content")):
+            return True
+        message = get_object_value(choice, "message")
+        if message is not None and _value_has_text(get_object_value(message, "content")):
+            return True
+        delta = get_object_value(choice, "delta")
+        if delta is not None and _value_has_text(get_object_value(delta, "content")):
+            return True
+    return False
+
+
+def _value_has_text(value) -> bool:
+    text = extract_text_content(value)
+    return isinstance(text, str) and text != ""
