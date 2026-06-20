@@ -12,6 +12,7 @@ from opentelemetry.instrumentation.anthropic.streaming import (
     AnthropicStream,
     FR_STREAMING_TIME_TO_FIRST_TOKEN_MS,
     FR_STREAMING_TIME_TO_GENERATE_MS,
+    _streaming_latency_ms,
 )
 from opentelemetry.instrumentation.fortifyroot import SafetyDecision, SafetyResult
 from opentelemetry.instrumentation.fortifyroot import (
@@ -25,6 +26,10 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
 )
 
 pytestmark = pytest.mark.fr
+
+
+def test_streaming_latency_ms_clamps_negative_duration():
+    assert _streaming_latency_ms(10.0, 9.0) == 0
 
 
 @pytest.fixture(autouse=True)
@@ -419,7 +424,7 @@ def test_anthropic_sync_stream_sets_streaming_latency_span_attrs(monkeypatch):
 
     timestamps = iter([101.25, 103.0])
     monkeypatch.setattr(
-        "opentelemetry.instrumentation.anthropic.streaming.time.time",
+        "opentelemetry.instrumentation.anthropic.streaming.time.perf_counter",
         lambda: next(timestamps),
     )
 
@@ -464,7 +469,7 @@ def test_anthropic_sync_stream_without_token_omits_streaming_latency_attrs(monke
 
     timestamps = iter([301.0])
     monkeypatch.setattr(
-        "opentelemetry.instrumentation.anthropic.streaming.time.time",
+        "opentelemetry.instrumentation.anthropic.streaming.time.perf_counter",
         lambda: next(timestamps),
     )
 
@@ -540,7 +545,7 @@ async def test_anthropic_async_stream_sets_streaming_latency_span_attrs(monkeypa
 
     timestamps = iter([201.1, 202.4])
     monkeypatch.setattr(
-        "opentelemetry.instrumentation.anthropic.streaming.time.time",
+        "opentelemetry.instrumentation.anthropic.streaming.time.perf_counter",
         lambda: next(timestamps),
     )
 

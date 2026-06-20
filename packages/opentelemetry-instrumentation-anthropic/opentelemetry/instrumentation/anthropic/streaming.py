@@ -50,7 +50,7 @@ GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS = getattr(
 
 
 def _streaming_latency_ms(start_time, end_time):
-    return int(round((end_time - start_time) * 1000))
+    return int(round(max(0, end_time - start_time) * 1000))
 
 
 def _is_streaming_token_item(item):
@@ -306,7 +306,7 @@ class AnthropicStream(ObjectProxy):
 
             item = self._streaming_safety.process_item(item)  # FR: streaming safety processing
             if self._first_token_time is None and _is_streaming_token_item(item):
-                self._first_token_time = time.time()
+                self._first_token_time = time.perf_counter()
                 _set_streaming_first_token_latency(
                     self._span,
                     self._start_time,
@@ -335,14 +335,14 @@ class AnthropicStream(ObjectProxy):
             GenAIAttributes.GEN_AI_RESPONSE_ID,
             self._complete_response.get("id"),
         )
-        end_time = time.time()
+        end_time = time.perf_counter()
         _set_streaming_time_to_generate(
             self._span,
             self._first_token_time,
             end_time,
         )
         if self._duration_histogram:
-            duration = end_time - self._start_time
+            duration = max(0, end_time - self._start_time)
             self._duration_histogram.record(
                 duration,
                 attributes=metric_attributes,
@@ -510,7 +510,7 @@ class AnthropicAsyncStream(ObjectProxy):
 
             item = self._streaming_safety.process_item(item)  # FR: streaming safety processing
             if self._first_token_time is None and _is_streaming_token_item(item):
-                self._first_token_time = time.time()
+                self._first_token_time = time.perf_counter()
                 _set_streaming_first_token_latency(
                     self._span,
                     self._start_time,
@@ -537,7 +537,7 @@ class AnthropicAsyncStream(ObjectProxy):
             request_model=self._kwargs.get("model"),
         )
         set_span_attribute(self._span, GenAIAttributes.GEN_AI_RESPONSE_ID, self._complete_response.get("id"))
-        end_time = time.time()
+        end_time = time.perf_counter()
         _set_streaming_time_to_generate(
             self._span,
             self._first_token_time,
@@ -545,7 +545,7 @@ class AnthropicAsyncStream(ObjectProxy):
         )
 
         if self._duration_histogram:
-            duration = end_time - self._start_time
+            duration = max(0, end_time - self._start_time)
             self._duration_histogram.record(
                 duration,
                 attributes=metric_attributes,

@@ -78,7 +78,7 @@ def test_streaming_callbacks_set_ttft_and_sttg_span_attrs(monkeypatch):
             return times.pop(0)
         return 103.0
 
-    monkeypatch.setattr(callback_handler.time, "time", fake_time)
+    monkeypatch.setattr(callback_handler.time, "perf_counter", fake_time)
 
     handler.on_llm_new_token("hello", run_id=run_id)
     handler.on_llm_end(_llm_result(), run_id=run_id)
@@ -88,6 +88,38 @@ def test_streaming_callbacks_set_ttft_and_sttg_span_attrs(monkeypatch):
     attrs = spans[0].attributes
     assert attrs[FR_STREAMING_TIME_TO_FIRST_TOKEN_MS] == 1250
     assert attrs[FR_STREAMING_TIME_TO_GENERATE_MS] == 1750
+
+
+def test_streaming_callbacks_clamp_negative_latency_attrs(monkeypatch):
+    _install_noop_fortifyroot(monkeypatch)
+    handler, exporter = _handler_and_exporter()
+    run_id = uuid4()
+
+    handler.on_llm_start(
+        serialized={"id": ["langchain_openai", "llms", "base", "OpenAI"]},
+        prompts=["hello"],
+        run_id=run_id,
+        invocation_params={"model": "gpt-4o-mini"},
+    )
+    handler.spans[run_id].start_time = 100.0
+
+    times = [99.0, 98.0]
+
+    def fake_time():
+        if times:
+            return times.pop(0)
+        return 98.0
+
+    monkeypatch.setattr(callback_handler.time, "perf_counter", fake_time)
+
+    handler.on_llm_new_token("hello", run_id=run_id)
+    handler.on_llm_end(_llm_result(), run_id=run_id)
+
+    spans = exporter.get_finished_spans()
+    assert len(spans) == 1
+    attrs = spans[0].attributes
+    assert attrs[FR_STREAMING_TIME_TO_FIRST_TOKEN_MS] == 0
+    assert attrs[FR_STREAMING_TIME_TO_GENERATE_MS] == 0
 
 
 def test_non_streaming_llm_end_does_not_set_streaming_latency_attrs(monkeypatch):
@@ -102,7 +134,7 @@ def test_non_streaming_llm_end_does_not_set_streaming_latency_attrs(monkeypatch)
         invocation_params={"model": "gpt-4o-mini"},
     )
     handler.spans[run_id].start_time = 100.0
-    monkeypatch.setattr(callback_handler.time, "time", lambda: 103.0)
+    monkeypatch.setattr(callback_handler.time, "perf_counter", lambda: 103.0)
 
     handler.on_llm_end(_llm_result(), run_id=run_id)
 

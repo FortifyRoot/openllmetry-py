@@ -263,7 +263,7 @@ def _instrumented_model_invoke_with_response_stream(
         # the response stream is fully consumed (which is why
         # ``start_as_current_span`` cannot be used directly).
         kwargs = _apply_invoke_prompt_safety(span, kwargs, _BEDROCK_INVOKE_SPAN_NAME)
-        stream_start_time = time.time()
+        stream_start_time = time.perf_counter()
         with trace.use_span(span, end_on_exit=False):
             response = fn(*args, **kwargs)
         _handle_stream_call(
@@ -306,7 +306,7 @@ def _instrumented_converse_stream(fn, tracer, metric_params, event_logger):
         kwargs = _apply_converse_prompt_safety(span, kwargs, _BEDROCK_CONVERSE_SPAN_NAME)
         # ST-10.4: see _instrumented_model_invoke_with_response_stream
         # for the rationale on use_span(end_on_exit=False).
-        stream_start_time = time.time()
+        stream_start_time = time.perf_counter()
         with trace.use_span(span, end_on_exit=False):
             response = fn(*args, **kwargs)
         if span.is_recording():

@@ -25,6 +25,10 @@ FR_STREAMING_TIME_TO_FIRST_TOKEN_MS = "fortifyroot.llm.streaming.time_to_first_t
 FR_STREAMING_TIME_TO_GENERATE_MS = "fortifyroot.llm.streaming.time_to_generate_ms"
 
 
+def _streaming_latency_ms(start_time, end_time):
+    return round(max(0, end_time - start_time) * 1000)
+
+
 class _BedrockChunkStreamingSafety:
     def __init__(self, *, span, span_name: str, request_type: str):
         self._streams = CompletionTextStreamGroup(
@@ -157,7 +161,7 @@ class BedrockInvokeSafetyStreamingWrapper(ObjectProxy):
         self._self_accumulating_body = {}
         self._self_pending_event = None
         self._self_stream_start_time = (
-            time.time() if stream_start_time is None else stream_start_time
+            time.perf_counter() if stream_start_time is None else stream_start_time
         )
         self._self_first_token_time = None
         self._self_streaming_safety = _BedrockChunkStreamingSafety(
@@ -233,12 +237,12 @@ class BedrockInvokeSafetyStreamingWrapper(ObjectProxy):
     def _observe_streaming_text(self, text):
         if not isinstance(text, str) or not text or self._self_first_token_time is not None:
             return
-        now = time.time()
+        now = time.perf_counter()
         self._self_first_token_time = now
         if self._self_span.is_recording():
             self._self_span.set_attribute(
                 FR_STREAMING_TIME_TO_FIRST_TOKEN_MS,
-                round((now - self._self_stream_start_time) * 1000),
+                _streaming_latency_ms(self._self_stream_start_time, now),
             )
 
     def _finish_streaming_latency(self):
@@ -246,7 +250,7 @@ class BedrockInvokeSafetyStreamingWrapper(ObjectProxy):
             return
         self._self_span.set_attribute(
             FR_STREAMING_TIME_TO_GENERATE_MS,
-            round((time.time() - self._self_first_token_time) * 1000),
+            _streaming_latency_ms(self._self_first_token_time, time.perf_counter()),
         )
 
 
@@ -367,7 +371,7 @@ class BedrockConverseSafetyStream(ObjectProxy):
         self._self_response_msg = []
         self._self_span_ended = False
         self._self_stream_start_time = (
-            time.time() if stream_start_time is None else stream_start_time
+            time.perf_counter() if stream_start_time is None else stream_start_time
         )
         self._self_first_token_time = None
         self._self_streaming_safety = _BedrockConverseStreamingSafety(
@@ -449,12 +453,12 @@ class BedrockConverseSafetyStream(ObjectProxy):
     def _observe_streaming_text(self, text):
         if not isinstance(text, str) or not text or self._self_first_token_time is not None:
             return
-        now = time.time()
+        now = time.perf_counter()
         self._self_first_token_time = now
         if self._self_span.is_recording():
             self._self_span.set_attribute(
                 FR_STREAMING_TIME_TO_FIRST_TOKEN_MS,
-                round((now - self._self_stream_start_time) * 1000),
+                _streaming_latency_ms(self._self_stream_start_time, now),
             )
 
     def _finish_streaming_latency(self):
@@ -462,7 +466,7 @@ class BedrockConverseSafetyStream(ObjectProxy):
             return
         self._self_span.set_attribute(
             FR_STREAMING_TIME_TO_GENERATE_MS,
-            round((time.time() - self._self_first_token_time) * 1000),
+            _streaming_latency_ms(self._self_first_token_time, time.perf_counter()),
         )
 
 

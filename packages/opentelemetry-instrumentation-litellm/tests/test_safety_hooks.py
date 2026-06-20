@@ -36,6 +36,7 @@ from opentelemetry.instrumentation.litellm.streaming_safety import (
     FR_STREAMING_TIME_TO_GENERATE_MS,
     _accumulate_streaming_chunk,
     _chunk_has_output_text,
+    _elapsed_seconds,
     _mask_streaming_chunk,
     is_async_streaming_response,
     is_sync_streaming_response,
@@ -57,6 +58,10 @@ pytestmark = pytest.mark.fr
 
 # The OTel span name used by FR's LiteLLM instrumentation.
 _FR_SPAN_NAME = "fortifyroot.litellm.safety"
+
+
+def test_streaming_elapsed_seconds_clamps_negative_duration():
+    assert _elapsed_seconds(10.0, 9.0) == 0
 
 
 def setup_function():
@@ -784,7 +789,7 @@ def test_sync_streaming_wrapper_sets_streaming_latency_attrs():
     ]
 
     with patch(
-        "opentelemetry.instrumentation.litellm.streaming_safety.time.time",
+        "opentelemetry.instrumentation.litellm.streaming_safety.time.perf_counter",
         side_effect=[100.0, 100.25, 100.9],
     ):
         list(
@@ -819,7 +824,7 @@ async def test_async_streaming_wrapper_sets_streaming_latency_attrs():
         )
 
     with patch(
-        "opentelemetry.instrumentation.litellm.streaming_safety.time.time",
+        "opentelemetry.instrumentation.litellm.streaming_safety.time.perf_counter",
         side_effect=[200.0, 200.125, 200.5],
     ):
         yielded = [
@@ -849,7 +854,7 @@ def test_streaming_wrapper_leaves_latency_attrs_unset_for_empty_stream():
     span = tracer.start_span("litellm.completion")
 
     with patch(
-        "opentelemetry.instrumentation.litellm.streaming_safety.time.time",
+        "opentelemetry.instrumentation.litellm.streaming_safety.time.perf_counter",
         side_effect=[300.0],
     ):
         list(

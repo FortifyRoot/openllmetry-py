@@ -83,6 +83,15 @@ LLM_REQUEST_TYPE = LLMRequestTypeValues.CHAT
 FR_STREAMING_TIME_TO_FIRST_TOKEN_MS = "fortifyroot.llm.streaming.time_to_first_token_ms"
 FR_STREAMING_TIME_TO_GENERATE_MS = "fortifyroot.llm.streaming.time_to_generate_ms"
 
+
+def _elapsed_seconds(start_time, end_time):
+    return max(0, end_time - start_time)
+
+
+def _elapsed_ms(start_time, end_time):
+    return round(_elapsed_seconds(start_time, end_time) * 1000)
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -117,7 +126,7 @@ def chat_wrapper(
         kwargs = _apply_prompt_safety(span, kwargs)
         run_async(_handle_request(span, kwargs, instance))
         try:
-            start_time = time.time()
+            start_time = time.perf_counter()
             # ST-10.4 (review-driven 2026-05-16): set
             # OPENAI_DIRECT_RETRY_PARENT_ACTIVE_KEY alongside the
             # existing SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY so
@@ -138,10 +147,10 @@ def chat_wrapper(
                 response = wrapped(*args, **kwargs)
             finally:
                 context_api.detach(token)
-            end_time = time.time()
+            end_time = time.perf_counter()
         except Exception as e:  # pylint: disable=broad-except
-            end_time = time.time()
-            duration = end_time - start_time if "start_time" in locals() else 0
+            end_time = time.perf_counter()
+            duration = _elapsed_seconds(start_time, end_time) if "start_time" in locals() else 0
 
             attributes = {
                 "error.type": e.__class__.__name__,
@@ -188,7 +197,7 @@ def chat_wrapper(
                     kwargs,
                 )
 
-        duration = end_time - start_time
+        duration = _elapsed_seconds(start_time, end_time)
 
         _apply_completion_safety(span, response)
         _handle_response(
@@ -238,7 +247,7 @@ async def achat_wrapper(
         await _handle_request(span, kwargs, instance)
 
         try:
-            start_time = time.time()
+            start_time = time.perf_counter()
             # ST-10.4 (review-driven 2026-05-16): see sync chat_wrapper
             # above for the rationale on OPENAI_DIRECT_RETRY_PARENT_ACTIVE_KEY.
             attempt_ctx = context_api.set_value(
@@ -252,10 +261,10 @@ async def achat_wrapper(
                 response = await wrapped(*args, **kwargs)
             finally:
                 context_api.detach(token)
-            end_time = time.time()
+            end_time = time.perf_counter()
         except Exception as e:  # pylint: disable=broad-except
-            end_time = time.time()
-            duration = end_time - start_time if "start_time" in locals() else 0
+            end_time = time.perf_counter()
+            duration = _elapsed_seconds(start_time, end_time) if "start_time" in locals() else 0
 
             common_attributes = Config.get_common_metrics_attributes()
             attributes = {
@@ -304,7 +313,7 @@ async def achat_wrapper(
                     kwargs,
                 )
 
-        duration = end_time - start_time
+        duration = _elapsed_seconds(start_time, end_time)
 
         await asyncio.to_thread(_apply_completion_safety, span, response)  # FR: async safety
         _handle_response(
@@ -781,10 +790,10 @@ class ChatStream(ObjectProxy):
             name=f"{SpanAttributes.LLM_CONTENT_COMPLETION_CHUNK}")
 
         if self._first_token:
-            self._time_of_first_token = time.time()
+            self._time_of_first_token = time.perf_counter()
             if self._streaming_time_to_first_token:
                 self._streaming_time_to_first_token.record(
-                    self._time_of_first_token - self._start_time,
+                    _elapsed_seconds(self._start_time, self._time_of_first_token),
                     attributes=self._shared_attributes(),
                 )
             self._first_token = False
@@ -794,7 +803,7 @@ class ChatStream(ObjectProxy):
                 _set_span_attribute(
                     self._span,
                     FR_STREAMING_TIME_TO_FIRST_TOKEN_MS,
-                    round((self._time_of_first_token - self._start_time) * 1000),
+                    _elapsed_ms(self._start_time, self._time_of_first_token),
                 )
 
         item = self._streaming_safety.process_chunk(item)
@@ -841,7 +850,7 @@ class ChatStream(ObjectProxy):
 
             # duration metrics
             if self._start_time and isinstance(self._start_time, (float, int)):
-                duration = time.time() - self._start_time
+                duration = _elapsed_seconds(self._start_time, time.perf_counter())
             else:
                 duration = None
             if duration and isinstance(duration, (float, int)) and self._duration_histogram:
@@ -850,7 +859,7 @@ class ChatStream(ObjectProxy):
                 )
             if self._streaming_time_to_generate and self._time_of_first_token:
                 self._streaming_time_to_generate.record(
-                    time.time() - self._time_of_first_token,
+                    _elapsed_seconds(self._time_of_first_token, time.perf_counter()),
                     attributes=self._shared_attributes(),
                 )
 
@@ -874,7 +883,7 @@ class ChatStream(ObjectProxy):
                 _set_span_attribute(
                     self._span,
                     FR_STREAMING_TIME_TO_GENERATE_MS,
-                    round((time.time() - self._time_of_first_token) * 1000),
+                    _elapsed_ms(self._time_of_first_token, time.perf_counter()),
                 )
 
             self._span.set_status(Status(StatusCode.OK))
@@ -924,7 +933,7 @@ class ChatStream(ObjectProxy):
         """Record metrics based on available partial data"""
         # Always record duration if we have start time
         if self._start_time and isinstance(self._start_time, (float, int)) and self._duration_histogram:
-            duration = time.time() - self._start_time
+            duration = _elapsed_seconds(self._start_time, time.perf_counter())
             self._duration_histogram.record(
                 duration, attributes=self._shared_attributes()
             )
@@ -981,17 +990,17 @@ def _build_from_streaming_response(
         item_to_yield = streaming_safety.process_chunk(item)
 
         if first_token:
-            time_of_first_token = time.time()
+            time_of_first_token = time.perf_counter()
             if streaming_time_to_first_token:
                 streaming_time_to_first_token.record(
-                    time_of_first_token - start_time)
+                    _elapsed_seconds(start_time, time_of_first_token))
             first_token = False
             # FR: also persist TTFT (ms, int) on the span for RDS extraction.
             if span and span.is_recording():
                 _set_span_attribute(
                     span,
                     FR_STREAMING_TIME_TO_FIRST_TOKEN_MS,
-                    round((time_of_first_token - start_time) * 1000),
+                    _elapsed_ms(start_time, time_of_first_token),
                 )
 
         _accumulate_stream_items(item, complete_response)
@@ -1020,13 +1029,13 @@ def _build_from_streaming_response(
 
     # duration metrics
     if start_time and isinstance(start_time, (float, int)):
-        duration = time.time() - start_time
+        duration = _elapsed_seconds(start_time, time.perf_counter())
     else:
         duration = None
     if duration and isinstance(duration, (float, int)) and duration_histogram:
         duration_histogram.record(duration, attributes=shared_attributes)
     if streaming_time_to_generate and time_of_first_token:
-        streaming_time_to_generate.record(time.time() - time_of_first_token)
+        streaming_time_to_generate.record(_elapsed_seconds(time_of_first_token, time.perf_counter()))
 
     # FR: persist STTG (ms, int) on the span for RDS extraction, only when a
     # first token actually arrived (not first_token).
@@ -1034,7 +1043,7 @@ def _build_from_streaming_response(
         _set_span_attribute(
             span,
             FR_STREAMING_TIME_TO_GENERATE_MS,
-            round((time.time() - time_of_first_token) * 1000),
+            _elapsed_ms(time_of_first_token, time.perf_counter()),
         )
 
     _set_response_attributes(span, complete_response)
@@ -1075,17 +1084,17 @@ async def _abuild_from_streaming_response(
         item_to_yield = streaming_safety.process_chunk(item)
 
         if first_token:
-            time_of_first_token = time.time()
+            time_of_first_token = time.perf_counter()
             if streaming_time_to_first_token:
                 streaming_time_to_first_token.record(
-                    time_of_first_token - start_time)
+                    _elapsed_seconds(start_time, time_of_first_token))
             first_token = False
             # FR: also persist TTFT (ms, int) on the span for RDS extraction.
             if span and span.is_recording():
                 _set_span_attribute(
                     span,
                     FR_STREAMING_TIME_TO_FIRST_TOKEN_MS,
-                    round((time_of_first_token - start_time) * 1000),
+                    _elapsed_ms(start_time, time_of_first_token),
                 )
 
         _accumulate_stream_items(item, complete_response)
@@ -1114,13 +1123,13 @@ async def _abuild_from_streaming_response(
 
     # duration metrics
     if start_time and isinstance(start_time, (float, int)):
-        duration = time.time() - start_time
+        duration = _elapsed_seconds(start_time, time.perf_counter())
     else:
         duration = None
     if duration and isinstance(duration, (float, int)) and duration_histogram:
         duration_histogram.record(duration, attributes=shared_attributes)
     if streaming_time_to_generate and time_of_first_token:
-        streaming_time_to_generate.record(time.time() - time_of_first_token)
+        streaming_time_to_generate.record(_elapsed_seconds(time_of_first_token, time.perf_counter()))
 
     # FR: persist STTG (ms, int) on the span for RDS extraction, only when a
     # first token actually arrived (not first_token).
@@ -1128,7 +1137,7 @@ async def _abuild_from_streaming_response(
         _set_span_attribute(
             span,
             FR_STREAMING_TIME_TO_GENERATE_MS,
-            round((time.time() - time_of_first_token) * 1000),
+            _elapsed_ms(time_of_first_token, time.perf_counter()),
         )
 
     _set_response_attributes(span, complete_response)

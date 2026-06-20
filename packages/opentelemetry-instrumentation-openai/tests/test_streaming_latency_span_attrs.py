@@ -66,13 +66,17 @@ def _recording_span():
     return span, exporter
 
 
+def test_elapsed_ms_clamps_negative_duration():
+    assert cw._elapsed_ms(10.0, 9.0) == 0
+
+
 def test_streaming_sets_positive_integer_latency_attrs(monkeypatch):
     """A streaming response that yields tokens sets both attributes as
     non-negative integer milliseconds on the single LLM span."""
     _neutralize_helpers(monkeypatch)
     span, exporter = _recording_span()
 
-    start = time.time() - 0.05  # 50ms ago => TTFT/STTG are clearly > 0
+    start = time.perf_counter() - 0.05  # 50ms ago => TTFT/STTG are clearly > 0
     ttft_hist, sttg_hist = _StubHistogram(), _StubHistogram()
     chunks = [object(), object(), object()]
 
@@ -109,7 +113,7 @@ def test_streaming_latency_attrs_do_not_require_metrics_histograms(monkeypatch):
             iter([object(), object()]),
             streaming_time_to_first_token=None,
             streaming_time_to_generate=None,
-            start_time=time.time() - 0.05,
+            start_time=time.perf_counter() - 0.05,
         )
     )
 
@@ -133,7 +137,7 @@ def test_empty_stream_sets_no_latency_attrs(monkeypatch):
             iter([]),
             streaming_time_to_first_token=_StubHistogram(),
             streaming_time_to_generate=_StubHistogram(),
-            start_time=time.time(),
+            start_time=time.perf_counter(),
         )
     )
 

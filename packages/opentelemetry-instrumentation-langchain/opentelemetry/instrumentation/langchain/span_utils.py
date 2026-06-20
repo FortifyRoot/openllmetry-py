@@ -38,7 +38,7 @@ class SpanHolder:
     workflow_name: str
     entity_name: str
     entity_path: str
-    start_time: float = field(default_factory=time.time)
+    start_time: float = field(default_factory=time.perf_counter)
     request_model: Optional[str] = None
     streaming_first_token_time: Optional[float] = None
     # ST-10 review-round-2 fix (2026-05-11): every context_api.attach()

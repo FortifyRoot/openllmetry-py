@@ -20,6 +20,7 @@ from opentelemetry.instrumentation.bedrock.streaming_safety import (
     _decode_chunk_event,
     _encode_chunk_event,
     _set_payload_text,
+    _streaming_latency_ms,
     create_converse_stream_wrapper,
     create_invoke_stream_wrapper,
 )
@@ -51,6 +52,10 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 pytestmark = pytest.mark.fr
+
+
+def test_streaming_latency_ms_clamps_negative_duration():
+    assert _streaming_latency_ms(10.0, 9.0) == 0
 
 
 def setup_function():
@@ -411,7 +416,7 @@ def test_invoke_streaming_wrapper_sets_latency_span_attrs(monkeypatch):
     )
     ticks = iter([100.125, 101.250])
     monkeypatch.setattr(
-        "opentelemetry.instrumentation.bedrock.streaming_safety.time.time",
+        "opentelemetry.instrumentation.bedrock.streaming_safety.time.perf_counter",
         lambda: next(ticks),
     )
 
@@ -496,7 +501,7 @@ def test_converse_streaming_wrapper_sets_latency_span_attrs(monkeypatch):
     )
     ticks = iter([200.050, 200.900])
     monkeypatch.setattr(
-        "opentelemetry.instrumentation.bedrock.streaming_safety.time.time",
+        "opentelemetry.instrumentation.bedrock.streaming_safety.time.perf_counter",
         lambda: next(ticks),
     )
 
