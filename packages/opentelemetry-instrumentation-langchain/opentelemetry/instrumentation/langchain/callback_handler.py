@@ -623,14 +623,14 @@ class TraceloopCallbackHandler(BaseCallbackHandler):
         if span_holder.streaming_first_token_time is not None:
             return
 
-        first_token_time = time.time()
+        first_token_time = time.perf_counter()
         span_holder.streaming_first_token_time = first_token_time
         span = span_holder.span
         if span.is_recording():
             _set_span_attribute(
                 span,
                 FR_STREAMING_TIME_TO_FIRST_TOKEN_MS,
-                round((first_token_time - span_holder.start_time) * 1000),
+                round(max(0, first_token_time - span_holder.start_time) * 1000),
             )
 
     @dont_throw
@@ -735,15 +735,15 @@ class TraceloopCallbackHandler(BaseCallbackHandler):
             set_chat_response(span, response)
 
         # Record duration before ending span
-        end_time = time.time()
+        end_time = time.perf_counter()
         streaming_first_token_time = self.spans[run_id].streaming_first_token_time
         if streaming_first_token_time is not None and span.is_recording():
             _set_span_attribute(
                 span,
                 FR_STREAMING_TIME_TO_GENERATE_MS,
-                round((end_time - streaming_first_token_time) * 1000),
+                round(max(0, end_time - streaming_first_token_time) * 1000),
             )
-        duration = end_time - self.spans[run_id].start_time
+        duration = max(0, end_time - self.spans[run_id].start_time)
         vendor = span.attributes.get(GenAIAttributes.GEN_AI_SYSTEM, "Langchain")
         self.duration_histogram.record(
             duration,

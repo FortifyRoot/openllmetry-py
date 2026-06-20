@@ -556,7 +556,7 @@ def _wrap(
 
     kwargs = _apply_prompt_safety(span, kwargs, name)
     _handle_input(span, event_logger, kwargs)
-    start_time = time.time()
+    start_time = time.perf_counter()
     # ST-10.4 (review-driven 2026-05-17): make the anthropic.chat span
     # the AMBIENT OTel context for the duration of the SDK call so the
     # FortifyRoot retry handler (wrapping
@@ -575,11 +575,11 @@ def _wrap(
         with trace.use_span(span, end_on_exit=False):
             response = wrapped(*args, **kwargs)
     except Exception as e:  # pylint: disable=broad-except
-        end_time = time.time()
+        end_time = time.perf_counter()
         attributes = error_metrics_attributes(e)
 
         if duration_histogram:
-            duration = end_time - start_time
+            duration = max(0, end_time - start_time)
             duration_histogram.record(duration, attributes=attributes)
 
         if exception_counter:
@@ -587,7 +587,7 @@ def _wrap(
 
         raise e
 
-    end_time = time.time()
+    end_time = time.perf_counter()
 
     if is_streaming_response(response):
         return AnthropicStream(
@@ -636,7 +636,7 @@ def _wrap(
             )
 
             if duration_histogram:
-                duration = time.time() - start_time
+                duration = max(0, time.perf_counter() - start_time)
                 duration_histogram.record(
                     duration,
                     attributes=metric_attributes,
@@ -697,18 +697,18 @@ async def _awrap(
     )
     kwargs = await asyncio.to_thread(_apply_prompt_safety, span, kwargs, name)  # FR: async safety
     await _ahandle_input(span, event_logger, kwargs)
-    start_time = time.time()
+    start_time = time.perf_counter()
     # ST-10.4 (review-driven 2026-05-17): see sync _wrap above for
     # rationale on use_span(end_on_exit=False) around the wrapped call.
     try:
         with trace.use_span(span, end_on_exit=False):
             response = await wrapped(*args, **kwargs)
     except Exception as e:  # pylint: disable=broad-except
-        end_time = time.time()
+        end_time = time.perf_counter()
         attributes = error_metrics_attributes(e)
 
         if duration_histogram:
-            duration = end_time - start_time
+            duration = max(0, end_time - start_time)
             duration_histogram.record(duration, attributes=attributes)
 
         if exception_counter:
@@ -766,7 +766,7 @@ async def _awrap(
         )
 
         if duration_histogram:
-            duration = time.time() - start_time
+            duration = max(0, time.perf_counter() - start_time)
             duration_histogram.record(
                 duration,
                 attributes=metric_attributes,

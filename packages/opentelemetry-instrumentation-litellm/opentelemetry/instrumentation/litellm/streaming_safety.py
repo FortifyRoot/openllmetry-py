@@ -17,6 +17,10 @@ FR_STREAMING_TIME_TO_FIRST_TOKEN_MS = "fortifyroot.llm.streaming.time_to_first_t
 FR_STREAMING_TIME_TO_GENERATE_MS = "fortifyroot.llm.streaming.time_to_generate_ms"
 
 
+def _elapsed_seconds(start_time, end_time):
+    return max(0, end_time - start_time)
+
+
 def is_sync_streaming_response(kwargs, response) -> bool:
     """Check if this is a streaming response."""
     if kwargs.get("stream"):
@@ -61,7 +65,7 @@ def wrap_sync_streaming_response(
         request_type=request_type,
     )
     complete_response = {"choices": [], "model": None, "usage": None}
-    stream_started_at = time.time()
+    stream_started_at = time.perf_counter()
     first_token_at = None
 
     try:
@@ -69,11 +73,11 @@ def wrap_sync_streaming_response(
             _mask_streaming_chunk(streams, chunk)
             _accumulate_streaming_chunk(complete_response, chunk)
             if first_token_at is None and _chunk_has_output_text(chunk):
-                first_token_at = time.time()
+                first_token_at = time.perf_counter()
                 _set_streaming_latency_attr(
                     span,
                     FR_STREAMING_TIME_TO_FIRST_TOKEN_MS,
-                    first_token_at - stream_started_at,
+                    _elapsed_seconds(stream_started_at, first_token_at),
                     set_canonical_span_attribute,
                 )
             yield chunk
@@ -81,7 +85,7 @@ def wrap_sync_streaming_response(
             _set_streaming_latency_attr(
                 span,
                 FR_STREAMING_TIME_TO_GENERATE_MS,
-                time.time() - first_token_at,
+                _elapsed_seconds(first_token_at, time.perf_counter()),
                 set_canonical_span_attribute,
             )
         _finalize_streaming_span(span, complete_response, set_response_attributes)
@@ -117,7 +121,7 @@ async def wrap_async_streaming_response(
         request_type=request_type,
     )
     complete_response = {"choices": [], "model": None, "usage": None}
-    stream_started_at = time.time()
+    stream_started_at = time.perf_counter()
     first_token_at = None
 
     try:
@@ -125,11 +129,11 @@ async def wrap_async_streaming_response(
             _mask_streaming_chunk(streams, chunk)
             _accumulate_streaming_chunk(complete_response, chunk)
             if first_token_at is None and _chunk_has_output_text(chunk):
-                first_token_at = time.time()
+                first_token_at = time.perf_counter()
                 _set_streaming_latency_attr(
                     span,
                     FR_STREAMING_TIME_TO_FIRST_TOKEN_MS,
-                    first_token_at - stream_started_at,
+                    _elapsed_seconds(stream_started_at, first_token_at),
                     set_canonical_span_attribute,
                 )
             yield chunk
@@ -137,7 +141,7 @@ async def wrap_async_streaming_response(
             _set_streaming_latency_attr(
                 span,
                 FR_STREAMING_TIME_TO_GENERATE_MS,
-                time.time() - first_token_at,
+                _elapsed_seconds(first_token_at, time.perf_counter()),
                 set_canonical_span_attribute,
             )
         _finalize_streaming_span(span, complete_response, set_response_attributes)
