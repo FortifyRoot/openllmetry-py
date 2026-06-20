@@ -463,6 +463,56 @@ def test_anthropic_sync_stream_sets_streaming_latency_span_attrs(monkeypatch):
     assert finished[0].attributes[FR_STREAMING_TIME_TO_GENERATE_MS] == 1750
 
 
+def test_anthropic_sync_stream_sets_latency_attrs_before_safety_masks_token(monkeypatch):
+    clear_safety_handlers()
+    register_completion_safety_stream_factory(lambda _: _FakeStreamSession())
+    exporter, tracer = _test_tracer()
+
+    timestamps = iter([101.25, 103.0])
+    monkeypatch.setattr(
+        "opentelemetry.instrumentation.anthropic.streaming.time.perf_counter",
+        lambda: next(timestamps),
+    )
+
+    span = tracer.start_span("anthropic.chat")
+    stream = AnthropicStream(
+        span,
+        _Iterator(
+            [
+                SimpleNamespace(
+                    type="content_block_start",
+                    index=0,
+                    content_block=SimpleNamespace(type="text"),
+                ),
+                SimpleNamespace(
+                    type="content_block_delta",
+                    index=0,
+                    delta=SimpleNamespace(type="text_delta", text="secret"),
+                ),
+                SimpleNamespace(type="content_block_stop", index=0),
+            ]
+        ),
+        SimpleNamespace(count_tokens=lambda text: len(text)),
+        100.0,
+        kwargs={},
+    )
+
+    first = next(stream)
+    second = next(stream)
+    third = next(stream)
+    with pytest.raises(StopIteration):
+        next(stream)
+
+    finished = exporter.get_finished_spans()
+    assert first.type == "content_block_start"
+    assert second.type == "content_block_delta"
+    assert second.delta.text == "masked-tail"
+    assert third.type == "content_block_stop"
+    assert len(finished) == 1
+    assert finished[0].attributes[FR_STREAMING_TIME_TO_FIRST_TOKEN_MS] == 1250
+    assert finished[0].attributes[FR_STREAMING_TIME_TO_GENERATE_MS] == 1750
+
+
 def test_anthropic_sync_stream_without_token_omits_streaming_latency_attrs(monkeypatch):
     clear_safety_handlers()
     exporter, tracer = _test_tracer()

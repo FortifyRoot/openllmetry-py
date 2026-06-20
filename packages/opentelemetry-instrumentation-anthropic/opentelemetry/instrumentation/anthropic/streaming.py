@@ -304,7 +304,6 @@ class AnthropicStream(ObjectProxy):
                     self._instrumentation_completed = True
                 raise e
 
-            item = self._streaming_safety.process_item(item)  # FR: streaming safety processing
             if self._first_token_time is None and _is_streaming_token_item(item):
                 self._first_token_time = time.perf_counter()
                 _set_streaming_first_token_latency(
@@ -312,6 +311,7 @@ class AnthropicStream(ObjectProxy):
                     self._start_time,
                     self._first_token_time,
                 )
+            item = self._streaming_safety.process_item(item)  # FR: streaming safety processing
             if self._pending_item is None:  # FR: pending-item buffer logic
                 self._pending_item = item  # FR: pending-item buffer logic
                 continue  # FR: pending-item buffer logic
@@ -508,7 +508,6 @@ class AnthropicAsyncStream(ObjectProxy):
                     self._instrumentation_completed = True
                 raise
 
-            item = self._streaming_safety.process_item(item)  # FR: streaming safety processing
             if self._first_token_time is None and _is_streaming_token_item(item):
                 self._first_token_time = time.perf_counter()
                 _set_streaming_first_token_latency(
@@ -516,6 +515,7 @@ class AnthropicAsyncStream(ObjectProxy):
                     self._start_time,
                     self._first_token_time,
                 )
+            item = self._streaming_safety.process_item(item)  # FR: streaming safety processing
             if self._pending_item is None:  # FR: pending-item buffer logic
                 self._pending_item = item  # FR: pending-item buffer logic
                 continue  # FR: pending-item buffer logic
