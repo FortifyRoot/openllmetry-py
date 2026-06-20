@@ -769,6 +769,7 @@ def test_streaming_chunk_output_detection_handles_delta_message_and_text():
 def test_sync_streaming_wrapper_sets_streaming_latency_attrs():
     exporter, tracer = _test_tracer()
     span = tracer.start_span("litellm.completion")
+    canonical_attrs = []
     chunks = [
         SimpleNamespace(
             choices=[
@@ -793,18 +794,24 @@ def test_sync_streaming_wrapper_sets_streaming_latency_attrs():
                 "chat",
                 "litellm.completion",
                 lambda *_: None,
+                set_canonical_span_attribute=lambda *args: canonical_attrs.append(args),
             )
         )
 
     attrs = exporter.get_finished_spans()[0].attributes
     assert attrs[FR_STREAMING_TIME_TO_FIRST_TOKEN_MS] == 250
     assert attrs[FR_STREAMING_TIME_TO_GENERATE_MS] == 650
+    assert canonical_attrs == [
+        (span, FR_STREAMING_TIME_TO_FIRST_TOKEN_MS, 250),
+        (span, FR_STREAMING_TIME_TO_GENERATE_MS, 650),
+    ]
 
 
 @pytest.mark.asyncio
 async def test_async_streaming_wrapper_sets_streaming_latency_attrs():
     exporter, tracer = _test_tracer()
     span = tracer.start_span("litellm.completion")
+    canonical_attrs = []
 
     async def _response():
         yield SimpleNamespace(
@@ -823,6 +830,7 @@ async def test_async_streaming_wrapper_sets_streaming_latency_attrs():
                 "chat",
                 "litellm.completion",
                 lambda *_: None,
+                set_canonical_span_attribute=lambda *args: canonical_attrs.append(args),
             )
         ]
 
@@ -830,6 +838,10 @@ async def test_async_streaming_wrapper_sets_streaming_latency_attrs():
     attrs = exporter.get_finished_spans()[0].attributes
     assert attrs[FR_STREAMING_TIME_TO_FIRST_TOKEN_MS] == 125
     assert attrs[FR_STREAMING_TIME_TO_GENERATE_MS] == 375
+    assert canonical_attrs == [
+        (span, FR_STREAMING_TIME_TO_FIRST_TOKEN_MS, 125),
+        (span, FR_STREAMING_TIME_TO_GENERATE_MS, 375),
+    ]
 
 
 def test_streaming_wrapper_leaves_latency_attrs_unset_for_empty_stream():

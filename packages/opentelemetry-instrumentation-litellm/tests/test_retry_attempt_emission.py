@@ -38,6 +38,11 @@ from opentelemetry.instrumentation.litellm import (
     _resolve_routed_provider,
     _start_retry_attempt_span,
     _finalize_retry_attempt_span,
+    _set_active_retry_attempt_attribute,
+)
+from opentelemetry.instrumentation.litellm.streaming_safety import (
+    FR_STREAMING_TIME_TO_FIRST_TOKEN_MS,
+    FR_STREAMING_TIME_TO_GENERATE_MS,
 )
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -237,6 +242,12 @@ def test_single_attempt_emits_one_retry_attempt_under_parent(fresh_tracer):
             "messages": [{"role": "user", "content": "hello masked [EMAIL]"}],
         }
         _start_retry_attempt_span(kwargs)
+        _set_active_retry_attempt_attribute(
+            parent, FR_STREAMING_TIME_TO_FIRST_TOKEN_MS, 123
+        )
+        _set_active_retry_attempt_attribute(
+            parent, FR_STREAMING_TIME_TO_GENERATE_MS, 456
+        )
 
         # Mock response object with usage/model.
         class MockUsage:
@@ -272,6 +283,8 @@ def test_single_attempt_emits_one_retry_attempt_under_parent(fresh_tracer):
     assert retry_span.attributes.get("gen_ai.response.id") == "resp-abc"
     assert retry_span.attributes.get("gen_ai.usage.input_tokens") == 10
     assert retry_span.attributes.get("gen_ai.usage.output_tokens") == 5
+    assert retry_span.attributes.get(FR_STREAMING_TIME_TO_FIRST_TOKEN_MS) == 123
+    assert retry_span.attributes.get(FR_STREAMING_TIME_TO_GENERATE_MS) == 456
     assert retry_span.attributes.get("gen_ai.prompt.0.role") == "user"
     assert retry_span.attributes.get("gen_ai.prompt.0.content") == "hello masked [EMAIL]"
 
