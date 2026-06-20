@@ -292,6 +292,38 @@ def _maybe_warn_retry_attempt_eviction(evicted: int) -> None:
     )
 
 
+def _set_active_retry_attempt_attribute(parent, key: str, value) -> None:
+    """Copy wrapper-owned attrs onto the canonical retry_attempt span.
+
+    LiteLLM streaming latency is measured by FR's safety wrapper while backend
+    dedup makes ``fortifyroot.litellm.attempt_N`` the canonical usage span.
+    Storing these attrs on the attempt span avoids relying on wrapper/attempt
+    spans arriving in the same OTLP batch.
+    """
+    if parent is None:
+        return
+
+    with _FR_RETRY_ATTEMPT_MAP_LOCK:
+        entries = [
+            entry
+            for entry in _FR_RETRY_ATTEMPT_MAP.values()
+            if entry.get("parent") is parent and not entry.get("ended")
+        ]
+        for entry in entries:
+            streaming_attrs = entry.setdefault("streaming_attrs", {})
+            streaming_attrs[key] = value
+            span = entry.get("span")
+            if span is None:
+                continue
+            try:
+                span.set_attribute(key, value)
+            except Exception:
+                logger.debug(
+                    "Failed to set streaming latency on retry_attempt span",
+                    exc_info=True,
+                )
+
+
 def _resolve_routed_provider(kwargs) -> Optional[str]:
     """Best-effort: derive the ROUTED provider (e.g. ``openai``) from
     LiteLLM kwargs for the retry_attempt span's ``gen_ai.system``
@@ -568,6 +600,8 @@ def _finalize_retry_attempt_span(
 
     try:
         if success:
+            for key, value in (entry.get("streaming_attrs") or {}).items():
+                span.set_attribute(key, value)
             response_model = get_object_value(response_obj, "model")
             if response_model:
                 span.set_attribute(GenAIAttributes.GEN_AI_RESPONSE_MODEL, str(response_model))
@@ -882,6 +916,7 @@ def _invoke_completion(tracer, wrapped, args, kwargs, *, is_text_completion=Fals
             span_name,
             _set_response_attributes,
             token=span_token,
+            set_canonical_span_attribute=_set_active_retry_attempt_attribute,
         )
 
     context_api.detach(span_token)
@@ -942,6 +977,7 @@ async def _invoke_acompletion(
             span_name,
             _set_response_attributes,
             token=span_token,
+            set_canonical_span_attribute=_set_active_retry_attempt_attribute,
         )
 
     context_api.detach(span_token)

@@ -38,7 +38,15 @@ def is_async_streaming_response(kwargs, response) -> bool:
     return False
 
 
-def wrap_sync_streaming_response(span, response, request_type, span_name, set_response_attributes, token=None):
+def wrap_sync_streaming_response(
+    span,
+    response,
+    request_type,
+    span_name,
+    set_response_attributes,
+    token=None,
+    set_canonical_span_attribute=None,
+):
     """Wrap a sync streaming response with per-chunk safety and span lifecycle.
 
     ``token`` is the OTel context token established by ``_invoke_completion``
@@ -66,6 +74,7 @@ def wrap_sync_streaming_response(span, response, request_type, span_name, set_re
                     span,
                     FR_STREAMING_TIME_TO_FIRST_TOKEN_MS,
                     first_token_at - stream_started_at,
+                    set_canonical_span_attribute,
                 )
             yield chunk
         if first_token_at is not None:
@@ -73,6 +82,7 @@ def wrap_sync_streaming_response(span, response, request_type, span_name, set_re
                 span,
                 FR_STREAMING_TIME_TO_GENERATE_MS,
                 time.time() - first_token_at,
+                set_canonical_span_attribute,
             )
         _finalize_streaming_span(span, complete_response, set_response_attributes)
     except Exception as exc:
@@ -93,6 +103,7 @@ async def wrap_async_streaming_response(
     span_name,
     set_response_attributes,
     token=None,
+    set_canonical_span_attribute=None,
 ):
     """Wrap an async streaming response with per-chunk safety and span lifecycle.
 
@@ -119,6 +130,7 @@ async def wrap_async_streaming_response(
                     span,
                     FR_STREAMING_TIME_TO_FIRST_TOKEN_MS,
                     first_token_at - stream_started_at,
+                    set_canonical_span_attribute,
                 )
             yield chunk
         if first_token_at is not None:
@@ -126,6 +138,7 @@ async def wrap_async_streaming_response(
                 span,
                 FR_STREAMING_TIME_TO_GENERATE_MS,
                 time.time() - first_token_at,
+                set_canonical_span_attribute,
             )
         _finalize_streaming_span(span, complete_response, set_response_attributes)
     except Exception as exc:
@@ -248,9 +261,17 @@ async def _aclose_streaming_response(response) -> None:
         await aclose()
 
 
-def _set_streaming_latency_attr(span, key: str, seconds: float) -> None:
+def _set_streaming_latency_attr(
+    span,
+    key: str,
+    seconds: float,
+    set_canonical_span_attribute=None,
+) -> None:
+    value = int(round(seconds * 1000))
     if span.is_recording():
-        span.set_attribute(key, int(round(seconds * 1000)))
+        span.set_attribute(key, value)
+    if set_canonical_span_attribute is not None:
+        set_canonical_span_attribute(span, key, value)
 
 
 def _chunk_has_output_text(chunk) -> bool:
