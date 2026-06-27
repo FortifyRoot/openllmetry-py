@@ -1,4 +1,4 @@
-"""§4.7.1 token-based framework-attempt registry.
+"""Token-based framework-attempt registry.
 
 Shared across all FR fork instrumentations. The flow is:
 
@@ -23,14 +23,13 @@ underlying httpx client, so the thread-local model still applies for
 the duration of one attempt. (Re-entrancy across threads is handled by
 the per-TID dict.)
 
-Design references:
-  - RETRY_LOOP.md §4.7   — suppression discipline rationale.
-  - RETRY_LOOP.md §4.7.1 — registry shape, eviction policy, required
-                            tests (re-entrancy, stale-cleanup,
-                            parent-end cleanup, cap-eviction,
-                            thread-ID reuse).
-  - phase_st10_retryloop.txt round-3 disposition — replaces an
-    earlier ``set[int]`` design that didn't handle re-entrancy.
+Design notes:
+  - The registry owns suppression discipline for framework retry loops.
+  - The shape, eviction policy, and tests cover re-entrancy,
+    stale-cleanup, parent-end cleanup, cap-eviction, and thread-ID
+    reuse.
+  - The token map replaces an earlier per-thread set design that did
+    not handle re-entrant attempts.
 """
 
 from __future__ import annotations
@@ -44,7 +43,7 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
-# Module-level state (per process). Per RETRY_LOOP.md §4.7.1:
+# Module-level state (per process):
 #   shape: dict[tid, dict[token, started_at_monotonic_seconds]]
 # Keying by tid (thread ID) is what makes per-thread ownership work;
 # keying by token within a TID is what makes re-entrancy work (one
@@ -227,8 +226,7 @@ def is_framework_owned(tid: Optional[int] = None) -> bool:
     truth for that logical call.
 
     Performs per-TID stale eviction in-band before answering, so a
-    leaked token cannot indefinitely suppress emission (see
-    review-round-4 Q2 fix in phase_st10_retryloop.txt).
+    leaked token cannot indefinitely suppress emission.
     """
     if tid is None:
         tid = threading.get_ident()

@@ -1,10 +1,10 @@
-"""Tests for ST-10.2 LangChain retry-aware emission.
+"""Tests for LangChain retry-aware attempt emission.
 
 Covers:
   - Instrumentor symmetry: _FortifyRootRetryHandler is wired up by
     LangchainInstrumentor and removed at uninstrument.
   - on_chat_model_start path (chat models — F1 finding from
-    ST-10.0 C2 POC).
+    retry-loop design C2 POC).
   - on_llm_start path (legacy completion LLMs).
   - Single-attempt happy path: 1 llm_attempt span, parent has
     has_attempt_child=true, llm_attempt has gen_ai.system /
@@ -49,7 +49,7 @@ def fresh_tracer():
     """A fresh TracerProvider + in-memory exporter installed as the
     GLOBAL tracer provider (so the retry handler's
     ``trace.get_tracer(...)`` lookups route through it). Same pattern
-    as the LiteLLM ST-10.1 tests."""
+    as the LiteLLM retry-attempt tests."""
     exporter = InMemorySpanExporter()
     provider = TracerProvider()
     provider.add_span_processor(SimpleSpanProcessor(exporter))
@@ -110,11 +110,11 @@ def test_instrumentor_wires_retry_handler_globally(instrument_legacy):
 
 
 def test_traceloop_handler_registered_before_fr_retry_handler(instrument_legacy):
-    """REGRESSION GUARD (review-batch-1 v6 fix 2026-05-11):
+    """Regression guard for LangChain callback ordering.
     LangChain dispatches callbacks in registration order. The
     Traceloop handler MUST run BEFORE the FR retry handler, so
     Traceloop's context-attach/detach discipline (existing,
-    ST-6-validated behavior) is preserved.
+    prior LangChain-validated behavior) is preserved.
 
     History: an earlier fix attempted the OPPOSITE order (FR
     retry first) so the OTel ambient at retry_attempt creation
@@ -169,7 +169,7 @@ def test_traceloop_handler_registered_before_fr_retry_handler(instrument_legacy)
 
 
 def test_no_leaked_ambient_context_after_simulated_workflow(instrument_legacy):
-    """REGRESSION GUARD (review-round-2 end-to-end regression, 2026-05-13):
+    """Regression guard for leaked ambient context after a workflow.
 
     The trace-id-leak bug that motivated this guard: a LangChain
     workflow that exercises the patched BaseCallbackManager.__init__
@@ -250,8 +250,8 @@ def test_no_leaked_ambient_context_after_simulated_workflow(instrument_legacy):
         f"OTel ambient context leaked after LangChain workflow — "
         f"a future test in the same pytest session would inherit "
         f"trace_id={remaining.trace_id:032x}, span_id="
-        f"{remaining.span_id:016x}. This is exactly the bug the "
-        f"review-batch-1 v6 trace-id-shared fix was meant to prevent."
+        f"{remaining.span_id:016x}. The ambient context must be "
+        f"fully detached after the simulated workflow."
     )
 
 
@@ -297,7 +297,7 @@ def test_uninstrument_invokes_unwrap_for_callback_manager():
 
 def test_on_chat_model_start_emits_retry_attempt(fresh_tracer):
     """Chat models fire on_chat_model_start (NOT on_llm_start) — F1
-    finding from ST-10.0 C2 POC. The handler MUST handle it."""
+    finding from retry-loop design C2 POC. The handler MUST handle it."""
     tracer, exporter, _ = fresh_tracer
     handler = _FortifyRootRetryHandler()
 

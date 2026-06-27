@@ -1,23 +1,21 @@
-"""ST-10.2 retry-aware emission for LangChain.
+"""Retry-aware emission for LangChain.
 
-Per RETRY_LOOP.md §4.4 LangChain row + §4.4.2 coverage limitation +
-ST-10.0 C2 empirical verification (POC results in
-phase_st10_retryloop.txt):
+Design contract:
 
-  - Hook BOTH ``on_chat_model_start`` (chat models, F1 finding)
+  - Hook BOTH ``on_chat_model_start`` (chat models)
     AND ``on_llm_start`` (legacy completion LLMs).
   - Per-HTTP-attempt firing is verified on framework-layer retry
     paths (e.g. ``Runnable.with_retry``); provider-SDK-internal
     retries (e.g. ``ChatOpenAI(max_retries=N)``) fire callbacks
-    once per logical call → §4.4.2 coverage limitation applies.
+    once per logical call, so the framework coverage limitation applies.
   - Use ``run_id`` as the per-attempt correlation key.
   - Emit ``fortifyroot.langchain.attempt_<N>`` sibling spans
     under the parent_run_id's span (NOT under the per-LLM
     Traceloop span — siblings need to share a parent for
     RetryDetectorProc's grouping to work).
-  - §4.7.1: register/unregister framework-attempt tokens so
-    direct-SDK wrappers (ST-10.4) suppress their own emission.
-  - §4.5: set has_attempt_child=true on the parent AFTER
+  - Register/unregister framework-attempt tokens so direct-SDK
+    wrappers suppress their own emission.
+  - Set has_attempt_child=true on the parent AFTER
     the first qualifying llm_attempt successfully starts.
   - Attempt numbering is conservative for LangChain: callbacks expose
     a workflow parent that can contain multiple unrelated LLM calls, so
@@ -28,7 +26,7 @@ This handler is registered ALONGSIDE the existing
 TraceloopCallbackHandler (not as a replacement) — it captures
 metadata only (model, tokens, status), so its placement is not
 safety-critical. The existing handler continues to do prompt /
-completion attribute capture; the §4.5 backend dedup correctly
+completion attribute capture; backend dedup correctly
 skips its per-attempt spans because they're non-retry siblings of
 the llm_attempts emitted here.
 """
@@ -64,18 +62,18 @@ from opentelemetry.trace import SpanKind, Status, StatusCode, set_span_in_contex
 
 logger = logging.getLogger(__name__)
 
-# ST-10 §4.4: per-attempt sibling span name + role.
+# Per-attempt sibling span name + role.
 _FR_SPAN_ROLE_KEY = "fortifyroot.span.role"
 _FR_LLM_ATTEMPT_SPAN_NAME_PREFIX = "fortifyroot.langchain"
 _FR_SPAN_ROLE_LLM_ATTEMPT = "llm_attempt"
 
-# ST-10 §4.5 parent marker.
+# Parent marker.
 _FR_HAS_ATTEMPT_CHILD_KEY = FR_HAS_ATTEMPT_CHILD_KEY
 
 
 # ----------------------------------------------------------------------
 # Per-attempt correlation map. Key = LangChain run_id (UUID per attempt
-# on framework-layer retry paths — verified ST-10.0 C2 POC). Value =
+# on framework-layer retry paths). Value =
 # {span, started_at_monotonic, framework_token, ended}. Bounded-size +
 # TTL eviction defends against framework crashes that leave attempts
 # open. Mirrors the LiteLLM map's shape for consistency across wrappers.
@@ -194,7 +192,7 @@ def _resolve_parent_span(
     retry_attempts must share one OTel parent → RetryDetectorProc can
     group them.
 
-    Resolution strategy (revised 2026-05-11 after review-round-2):
+    Resolution strategy:
 
     Strategy A — TRACELOOP SPANS-DICT LOOKUP (load-bearing when
     parent_run_id is set):
@@ -209,7 +207,7 @@ def _resolve_parent_span(
       The ``traceloop_handler`` is passed as a DIRECT reference at
       ``_FortifyRootRetryHandler`` construction time (NOT via a
       mutable shared back-reference to BaseCallbackManager). This
-      fixes the review-round-2 Major-5 concern: a single shared
+      avoids a single shared
       ``_FortifyRootRetryHandler`` instance was being mutated
       per-BaseCallbackManager-init, racing concurrent callbacks
       onto the wrong manager's spans dict.
@@ -226,14 +224,14 @@ def _resolve_parent_span(
       its per-LLM span as the OTel ambient, so ambient is the
       correct workflow parent.
 
-    No-emission policy (review-round-2 Blocker 2):
+    No-emission policy:
       If parent_run_id IS set AND traceloop_handler is provided
       (production wiring) BUT Strategy A's Traceloop lookup fails
       (parent_run_id not in its spans dict — e.g. evicted, stale),
       DO NOT fall back to ambient. Ambient at that moment is likely
       Traceloop's per-LLM span (handler-order is Traceloop-first)
       and parenting under it would break sibling-grouping. Return
-      None; the caller skips emission with a debug log. The §4.5
+      None; the caller skips emission with a debug log. Backend
       backend dedup degrades gracefully (no retry_attempt → parent
       stays canonical → single LLMUsageEvent per call).
     """
@@ -327,7 +325,7 @@ def _add_prompt_attrs(
 ) -> None:
     """Copy LangChain's request content onto the retry_attempt span.
 
-    Backend §4.5 makes retry_attempt the canonical LLMUsageEvent span
+    Backend dedup makes retry_attempt the canonical LLMUsageEvent span
     when it exists. Safety E2E tests and customers looking up the
     canonical event therefore still need the same prompt content that
     Traceloop's normal LLM span carries. The callback receives prompts
@@ -381,7 +379,7 @@ def _start_retry_attempt(
     parent_span = _resolve_parent_span(parent_run_id, traceloop_handler=traceloop_handler)
     if parent_span is None:
         # No ambient parent → orphan retry_attempt would have no place
-        # in the trace tree. Skip emission. The §4.5 backend dedup
+        # in the trace tree. Skip emission. Backend dedup
         # degrades gracefully when no retry_attempt exists.
         logger.debug(
             "no ambient parent span for langchain retry_attempt; skipping emission "
@@ -447,7 +445,7 @@ def _start_retry_attempt(
             "ended": False,
         }
 
-    # §4.5 marker timing: set AFTER the first qualifying llm_attempt
+    # Parent-marker timing: set AFTER the first qualifying llm_attempt
     # has successfully started under this parent. Idempotent — setting
     # the attribute twice on the same parent is a no-op.
     try:
@@ -537,7 +535,7 @@ class _FortifyRootRetryHandler(BaseCallbackHandler):
     """LangChain BaseCallbackHandler that emits one
     fortifyroot.langchain.attempt_<N> sibling span per LLM-start
     callback invocation. Hooks BOTH on_chat_model_start (chat models —
-    F1 finding from ST-10.0 C2 POC) AND on_llm_start (legacy
+    observed chat-model path) AND on_llm_start (legacy
     completion LLMs).
 
     Key correlation: ``run_id`` (UUID minted per attempt by LangChain).
@@ -560,8 +558,7 @@ class _FortifyRootRetryHandler(BaseCallbackHandler):
     run_inline: bool = True
 
     # Set by ``_BaseCallbackManagerInitWrapper`` at construction time
-    # (NOT mutated per-callback-manager-init — see review-round-2
-    # Major-5). Direct reference to the sibling Traceloop handler whose
+    # (NOT mutated per-callback-manager-init). Direct reference to the sibling Traceloop handler whose
     # ``spans`` dict we look up by run_id to resolve the workflow
     # parent for sibling-grouping across multi-attempt retries. See
     # ``_resolve_parent_span``.

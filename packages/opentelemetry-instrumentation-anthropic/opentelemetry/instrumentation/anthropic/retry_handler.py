@@ -1,7 +1,6 @@
-"""ST-10.4 retry-aware emission for the Anthropic direct SDK.
+"""Retry-aware emission for the Anthropic direct SDK.
 
-Per RETRY_LOOP.md §4.4 Anthropic row + §4.7 suppression discipline +
-ST-10.0 hook-table addendum (in phase_st10_retryloop.txt):
+Design contract:
 
   - Hook ``anthropic._base_client.SyncHttpxClientWrapper.send`` and
     ``AsyncHttpxClientWrapper.send`` — fires once per HTTP attempt
@@ -16,17 +15,16 @@ ST-10.0 hook-table addendum (in phase_st10_retryloop.txt):
   - Endpoint allow-list: only LLM endpoints emit retry_attempt spans
     (``/v1/messages`` for the modern Messages API,
     ``/v1/complete`` for legacy completions). Anything else (token
-    refresh, model listing, etc.) does NOT emit retry_attempt — per
-    §4.4.1 allow-listing requirement.
-  - Suppression discipline (§4.7): check BOTH the OTel context
+    refresh, model listing, etc.) does NOT emit retry_attempt.
+  - Suppression discipline: check BOTH the OTel context
     ``SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY`` AND the shared
     ``is_framework_owned()`` registry. If either says "suppress",
     skip emission. Prevents framework retries (LiteLLM / LangChain /
     LlamaIndex) from DOUBLE-emitting when both framework wrappers
     and direct-SDK wrappers are active.
   - Parent resolution: use the current OTel ambient span. If invalid
-    or absent, skip gracefully (no orphan retry_attempt span). The
-    §4.5 backend dedup degrades gracefully.
+    or absent, skip gracefully (no orphan retry_attempt span). Backend
+    dedup degrades gracefully.
 
 Tests: see ``tests/test_retry_attempt_emission.py``.
 """
@@ -54,7 +52,7 @@ from wrapt import wrap_function_wrapper
 logger = logging.getLogger(__name__)
 
 
-# ST-10 §4.4 / §4.5 constants.
+# Retry-attempt constants.
 _FR_SPAN_ROLE_KEY = "fortifyroot.span.role"
 _FR_LLM_ATTEMPT_SPAN_NAME_PREFIX = "fortifyroot.anthropic"
 _FR_SPAN_ROLE_LLM_ATTEMPT = "llm_attempt"
@@ -199,9 +197,7 @@ def _start_attempt_span(request: Any, parent_span: "trace.Span") -> "trace.Span"
         # ``anthropic/__init__.py`` ``_wrap``). The earlier draft of
         # this handler used lower-case "anthropic" for cross-handler
         # consistency, but that mismatched the upstream Anthropic
-        # instrumentor and the fr-system-tests ProviderModel
-        # ``gen_ai_system="Anthropic"`` assertion — ST-10.4
-        # review-driven fix 2026-05-17. Backend provider grouping is
+        # instrumentor and provider-model assertions. Backend provider grouping is
         # case-sensitive in practice; canonicalisation happens via
         # ``event_provider`` (which is always lower-case in tests).
         "gen_ai.system": "Anthropic",
@@ -229,11 +225,11 @@ def _finalize_success(span: "trace.Span", response: Any, *, is_streaming: bool =
 
     For non-streaming responses (regardless of 2xx vs non-2xx), parse
     the JSON body and extract usage tokens + response id + response
-    model. Per RETRY_LOOP.md §4.4 token-usage rule (around line 164):
+    model. Per the retry-attempt token-usage rule:
     wrappers MUST extract usage from the response body whenever it's
     present, regardless of whether the attempt succeeded — some
     failures DO consume tokens and the provider returns usage in the
-    error body. §4.5 backend dedup makes the qualifying retry_attempt
+    error body. Backend dedup makes the qualifying retry_attempt
     canonical (even single-attempt), so usage must live on this span.
 
     Streaming responses (``stream=True`` passed to ``send()``) skip
@@ -257,7 +253,7 @@ def _finalize_success(span: "trace.Span", response: Any, *, is_streaming: bool =
             pass
 
         # Non-streaming body parse — applies to BOTH 2xx and non-2xx per the
-        # §4.4 token-usage rule. ``_extract_usage_from_body`` is fully
+        # retry-attempt token-usage rule. ``_extract_usage_from_body`` is fully
         # defensive (missing fields / parse failure / no ``usage`` block all
         # degrade silently).
         if not is_streaming:
@@ -348,22 +344,21 @@ def _should_emit_for(request: Any) -> bool:
 def _sync_send_wrapper(wrapped, instance, args, kwargs):
     """Wraps ``anthropic._base_client.SyncHttpxClientWrapper.send``.
 
-    Direct-SDK wrappers do NOT register tokens in the §4.7.1 framework
+    Direct-SDK wrappers do NOT register tokens in the framework-attempt
     registry (the registry's contract reserves registration for FRAMEWORK
     wrappers — LiteLLM / LangChain / LlamaIndex). They only consult via
     ``is_framework_owned()``. Self-registering would falsely suppress
     concurrent direct-SDK calls on the same OS thread, which manifests
     most visibly under asyncio (multiple tasks sharing one thread).
 
-    Streaming skip (ST-10.4 review-driven 2026-05-17): when
+    Streaming skip: when
     ``stream=True`` is passed to send, this wrapper SKIPS retry_attempt
     emission. Streaming retry_attempts cannot carry usage (SSE stream
-    can't be peeked) but §4.5 dedup would still promote them to the
+    can't be peeked) but backend dedup would still promote them to the
     canonical LLMUsageEvent, producing zero-token events. Leaving the
     parent ``anthropic.chat`` span as the canonical (it gets full
     usage from the Anthropic streaming wrapper). Streaming retry-loop
-    detection is the deferred follow-up
-    ``ST-10.4-FOLLOWUP-streaming-usage``.
+    detection is a deferred streaming-usage follow-up.
     """
     request = args[0] if args else kwargs.get("request")
     if request is None or not _should_emit_for(request):
@@ -490,7 +485,7 @@ def instrument_retry_emitter(tracer_provider=None) -> None:
         )
         if not sync_ok:
             logger.warning(
-                "ST-10.4: anthropic._base_client.%s.%s missing/incompatible; "
+                "Anthropic retry emitter: anthropic._base_client.%s.%s missing/incompatible; "
                 "skipping sync retry_attempt emission. Normal anthropic "
                 "instrumentation is unaffected.",
                 _SYNC_WRAPPER_CLASS, _WRAPPED_METHOD,
@@ -504,13 +499,13 @@ def instrument_retry_emitter(tracer_provider=None) -> None:
                 )
             except Exception as e:
                 logger.warning(
-                    "ST-10.4: failed to wrap anthropic sync httpx send (%s); "
+                    "Anthropic retry emitter: failed to wrap anthropic sync httpx send (%s); "
                     "retry_attempt emission disabled for sync path",
                     e,
                 )
         if not async_ok:
             logger.warning(
-                "ST-10.4: anthropic._base_client.%s.%s missing/incompatible; "
+                "Anthropic retry emitter: anthropic._base_client.%s.%s missing/incompatible; "
                 "skipping async retry_attempt emission. Normal anthropic "
                 "instrumentation is unaffected.",
                 _ASYNC_WRAPPER_CLASS, _WRAPPED_METHOD,
@@ -524,7 +519,7 @@ def instrument_retry_emitter(tracer_provider=None) -> None:
                 )
             except Exception as e:
                 logger.warning(
-                    "ST-10.4: failed to wrap anthropic async httpx send (%s); "
+                    "Anthropic retry emitter: failed to wrap anthropic async httpx send (%s); "
                     "retry_attempt emission disabled for async path",
                     e,
                 )
@@ -543,7 +538,7 @@ def uninstrument_retry_emitter() -> None:
                 unwrap(f"{_ANTHROPIC_BASE_CLIENT_MODULE}.{cls}", _WRAPPED_METHOD)
             except Exception:
                 logger.debug(
-                    "ST-10.4: anthropic unwrap of %s.%s failed (likely "
+                    "Anthropic retry emitter: unwrap of %s.%s failed (likely "
                     "wrap was never installed for this variant)",
                     cls, _WRAPPED_METHOD,
                     exc_info=True,

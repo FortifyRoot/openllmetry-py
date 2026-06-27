@@ -61,12 +61,12 @@ _FR_SPAN_ROLE_VALUE = "safety_wrapper"
 # ``buildSafetyWrapperDedupeSet`` cannot observe siblings across batches.
 _FR_HAS_NATIVE_OTEL_CHILD_KEY = "fortifyroot.span.has_native_otel_child"
 
-# ST-10 §4.5: marker on parent set AFTER the first qualifying llm_attempt
+# Marker on parent set AFTER the first qualifying llm_attempt
 # child has started, so the FR backend's LLMUsageExtractor can dedup the
 # parent + non-attempt siblings cross-batch (mirrors has_native_otel_child).
 _FR_HAS_ATTEMPT_CHILD_KEY = FR_HAS_ATTEMPT_CHILD_KEY
 
-# ST-10 §4.4: per-attempt sibling span emitted by _FortifyRootRetryEmitter
+# Per-attempt sibling span emitted by _FortifyRootRetryEmitter
 # under the safety_wrapper parent.
 _FR_LLM_ATTEMPT_SPAN_NAME_PREFIX = "fortifyroot.litellm"
 _FR_SPAN_ROLE_LLM_ATTEMPT = "llm_attempt"
@@ -187,8 +187,7 @@ _WRAPPED_METHODS = [
 # isn't installed (the instrumentor's ``instrumentation_dependencies`` check
 # guards actual use).
 #
-# Discovered end-to-end during ST-10 review-batch-1 re-verification 2026-05-10
-# after local vendoring. The pre-existing _FortifyRootCompletionLogger is
+# Discovered end-to-end after local vendoring. The pre-existing _FortifyRootCompletionLogger is
 # also duck-typed (same latent bug) but its primary safety-masking path is
 # synchronous inside _finalize_response, so its callback never firing is
 # masked in production. The retry emitter has no such backup — purely
@@ -200,22 +199,22 @@ except ImportError:
 
 
 # ----------------------------------------------------------------------
-# ST-10 §4.4 / §4.3: retry-attempt sibling-span emission via a second
+# Retry-attempt sibling-span emission via a second
 # LiteLLM CustomLogger.
 # ----------------------------------------------------------------------
 #
 # The emitter opens one ``fortifyroot.litellm.attempt_<N>`` sibling span
 # per attempt-start callback fired by LiteLLM, and ends it on the matching
-# success/failure callback. Per ST-10.0 C1 source-verified findings, this
+# success/failure callback. This
 # fires per-attempt only on the ``completion_with_retries(num_retries=N)``
-# and ``Router(...)`` retry surfaces — see RETRY_LOOP.md §4.4.2 for the
-# documented coverage limitation on the ``completion(num_retries=N)``
-# path (where retries delegate to the underlying provider SDK and are
+# and ``Router(...)`` retry surfaces. There is a documented coverage
+# limitation on the ``completion(num_retries=N)`` path (where retries
+# delegate to the underlying provider SDK and are
 # invisible to LiteLLM's callback layer).
 
-# Per-attempt correlation map (§4.3). Key = LiteLLM's per-call
+# Per-attempt correlation map. Key = LiteLLM's per-call
 # ``litellm_call_id`` (sufficient because each attempt at the
-# observable surfaces gets a fresh ID — verified ST-10.0 C2 POC). Value =
+# observable surfaces gets a fresh ID). Value =
 # {span, started_at_monotonic, parent_span, framework_token, ended}.
 # Bounded-size + TTL eviction defends against framework crashes that
 # leave attempts open.
@@ -327,7 +326,7 @@ def _set_active_retry_attempt_attribute(parent, key: str, value) -> None:
 def _resolve_routed_provider(kwargs) -> Optional[str]:
     """Best-effort: derive the ROUTED provider (e.g. ``openai``) from
     LiteLLM kwargs for the retry_attempt span's ``gen_ai.system``
-    attribute. Per RETRY_LOOP.md §4.2, this is the routed provider
+    attribute. This is the routed provider
     (NOT the framework name). Falls back to ``litellm`` if undetermined.
     """
     candidate = (
@@ -353,7 +352,7 @@ def _resolve_routed_provider(kwargs) -> Optional[str]:
                 # ``claude-4-sonnet-20250514``) even when the public
                 # call used ``anthropic/<model>``. Without this inference
                 # retry_attempt spans fall back to gen_ai.system="litellm",
-                # so the backend stores the canonical ST-10 event under the
+                # so the backend stores the canonical event under the
                 # framework rather than the routed provider.
                 raw = "anthropic"
             elif model and "." in model:
@@ -374,13 +373,13 @@ def _resolve_routed_provider(kwargs) -> Optional[str]:
 
 # Normalisation for the ``gen_ai.system`` attribute.
 #
-# Per RETRY_LOOP.md §4.2, the value MUST be the ROUTED provider, NOT
+# The value MUST be the ROUTED provider, NOT
 # the framework, AND it MUST be the canonical OTel-semconv form (e.g.
 # Bedrock = ``"AWS"``). LiteLLM's ``custom_llm_provider`` field uses
 # its own taxonomy (``"bedrock"``, ``"bedrock_converse"``,
-# ``"sagemaker"``, ...), so we map those to the §4.2 canonical
-# values and leave already-canonical values untouched. (Review-batch-1
-# Minor 4 fix 2026-05-10 — keeps cross-wrapper consistency with
+# ``"sagemaker"``, ...), so we map those to canonical
+# values and leave already-canonical values untouched. This keeps
+# cross-wrapper consistency with
 # LangChain's _resolve_routed_provider which already normalises
 # langchain_aws → ``"AWS"``.)
 _LITELLM_PROVIDER_NORMALISATION = {
@@ -399,7 +398,7 @@ _LITELLM_PROVIDER_NORMALISATION = {
 
 
 def _normalize_routed_provider(raw: str) -> str:
-    """Map LiteLLM's provider taxonomy to RETRY_LOOP.md §4.2's
+    """Map LiteLLM's provider taxonomy to the retry-attempt contract's
     routed-provider form. If no mapping applies, return the raw
     value lower-cased (matches OpenAI / Anthropic which already
     use the canonical form).
@@ -452,7 +451,7 @@ def _add_retry_attempt_prompt_attrs(
 ) -> None:
     """Copy request prompt content onto the retry_attempt span.
 
-    Backend §4.5 makes retry_attempt the canonical LLMUsageEvent span
+    Backend dedup makes retry_attempt the canonical LLMUsageEvent span
     when it exists. Safety correlation and masking assertions therefore
     need the same request content on the retry_attempt span that the
     safety_wrapper parent carries.
@@ -514,7 +513,7 @@ def _start_retry_attempt_span(kwargs, *, is_text_completion: bool = False) -> No
         attrs[GenAIAttributes.GEN_AI_REQUEST_MODEL] = str(model)
     server = _server_address(kwargs)
     if server:
-        # Per RETRY_LOOP.md §4.2, attribute name is the OTel-standard
+        # Attribute name is the OTel-standard
         # ``server.address`` (network namespace) — using the literal
         # key string for forward-compat across semconv lib changes.
         attrs["server.address"] = server
@@ -533,7 +532,7 @@ def _start_retry_attempt_span(kwargs, *, is_text_completion: bool = False) -> No
         context=parent_ctx,
     )
 
-    # §4.7.1: register a framework-attempt token so direct-SDK
+    # Register a framework-attempt token so direct-SDK
     # wrappers (OpenAI/Anthropic/Bedrock) suppress their own emission
     # while this attempt is in flight.
     try:
@@ -557,7 +556,7 @@ def _start_retry_attempt_span(kwargs, *, is_text_completion: bool = False) -> No
             "ended": False,
         }
 
-    # §4.5 marker timing: set has_attempt_child=true on the
+    # Parent-marker timing: set has_attempt_child=true on the
     # parent ONLY AFTER the first qualifying llm_attempt has
     # successfully started. We just succeeded; mark the parent now.
     # Idempotent: setting the attribute twice on the same parent is a
@@ -615,7 +614,7 @@ def _finalize_retry_attempt_span(
             output_tokens = get_object_value(usage, "completion_tokens")
             if output_tokens is None:
                 output_tokens = get_object_value(usage, "output_tokens")
-            # Per §4.2 token-usage rule: SET when known, OMIT when unknown.
+            # Token-usage rule: SET when known, OMIT when unknown.
             if input_tokens is not None:
                 span.set_attribute(GenAIAttributes.GEN_AI_USAGE_INPUT_TOKENS, int(input_tokens))
             if output_tokens is not None:
@@ -625,7 +624,7 @@ def _finalize_retry_attempt_span(
             exception = kwargs.get("exception") if isinstance(kwargs, dict) else None
             status_code = _httpx_status_code(exception) or _httpx_status_code(response_obj)
             if status_code is not None:
-                # Per RETRY_LOOP.md §4.2 the attribute name is the
+                # The attribute name is the
                 # OTel-standard ``http.status_code`` (legacy semconv;
                 # backend extractor reads the literal key, not a
                 # python-binding constant).
@@ -778,7 +777,7 @@ class LiteLLMInstrumentor(BaseInstrumentor):
                 litellm.callbacks = []
             self._fr_logger = _FortifyRootCompletionLogger()
             litellm.callbacks.insert(0, self._fr_logger)
-            # ST-10.1: register the retry-attempt emitter immediately
+            # Register the retry-attempt emitter immediately
             # AFTER the completion logger so completion-safety masking
             # still runs first. The retry emitter captures metadata
             # only (model, tokens, status), so its placement is not
@@ -873,7 +872,7 @@ def _invoke_completion(tracer, wrapped, args, kwargs, *, is_text_completion=Fals
     if _native_otel_callback_active():
         # Hint to the FR backend that this safety_wrapper WILL have a
         # sibling litellm_request child emitted by LiteLLM's native OTel
-        # callback — enables single-pass dedup in proc_llm_extractor.go
+        # callback — enables single-pass dedup in backend LLM extractor
         # without needing to see the child in the same OTLP batch.
         span_attrs[_FR_HAS_NATIVE_OTEL_CHILD_KEY] = True
     span = tracer.start_span(

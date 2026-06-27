@@ -78,8 +78,7 @@ LLM_REQUEST_TYPE = LLMRequestTypeValues.CHAT
 
 # FR: stable internal span attributes carrying streaming latency as integer
 # milliseconds, so the backend can extract TTFT/STTG into RDS llm_usage_events.
-# Additive to (not a replacement for) the Mimir streaming histograms. Contract:
-# fr-backend/docs/development/STREAMING_LATENCY_TTFT_STTG_PLAN.md
+# Additive to (not a replacement for) the Mimir streaming histograms.
 FR_STREAMING_TIME_TO_FIRST_TOKEN_MS = "fortifyroot.llm.streaming.time_to_first_token_ms"
 FR_STREAMING_TIME_TO_GENERATE_MS = "fortifyroot.llm.streaming.time_to_generate_ms"
 
@@ -127,7 +126,7 @@ def chat_wrapper(
         run_async(_handle_request(span, kwargs, instance))
         try:
             start_time = time.perf_counter()
-            # ST-10.4 (review-driven 2026-05-16): set
+            # Set
             # OPENAI_DIRECT_RETRY_PARENT_ACTIVE_KEY alongside the
             # existing SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY so
             # the FortifyRoot retry handler can distinguish this
@@ -248,7 +247,7 @@ async def achat_wrapper(
 
         try:
             start_time = time.perf_counter()
-            # ST-10.4 (review-driven 2026-05-16): see sync chat_wrapper
+            # See sync chat_wrapper
             # above for the rationale on OPENAI_DIRECT_RETRY_PARENT_ACTIVE_KEY.
             attempt_ctx = context_api.set_value(
                 SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY, True,

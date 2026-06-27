@@ -1,21 +1,19 @@
-"""ST-10.3 retry-aware emission for LlamaIndex.
+"""Retry-aware emission for LlamaIndex.
 
-Per RETRY_LOOP.md §4.4 LlamaIndex row + §4.4.2 coverage limitation +
-ST-10.0 C3 empirical verification (POC findings F4-F6 in
-phase_st10_retryloop.txt):
+Design contract:
 
   - LlamaIndex's ``OpenAI.chat()`` (and equivalents) fires the
     dispatcher span TWICE per HTTP attempt — once on the public
     ``chat()`` method and once on the inner ``_chat()`` (F4).
     A naive event-handler approach emits 2x retry_attempt children
-    per attempt. ST-10.3 hooks the SPAN HANDLER (not the event
+    per attempt. This hooks the SPAN HANDLER (not the event
     handler) and filters to OUTER public methods only via a
     method-name whitelist + ``BaseLLM`` instance check.
   - Per-attempt firing is verified empirically on framework-layer
     retry paths (e.g. tenacity wrapping at the application layer).
     Provider-SDK-internal retries (e.g.
     ``OpenAI(max_retries=N).chat(...)``) fire dispatcher spans ONCE
-    per logical call → §4.4.2 coverage limitation applies (same
+    per logical call, so the framework coverage limitation applies (same
     pattern as LiteLLM C1 / LangChain C2).
   - ``span_enter``/``span_exit``/``span_drop`` lifecycle hooks
     correlate cleanly: each enter has a matching exit OR drop, so
@@ -58,12 +56,12 @@ from opentelemetry.trace import SpanKind, Status, StatusCode, set_span_in_contex
 
 logger = logging.getLogger(__name__)
 
-# ST-10 §4.4: per-attempt sibling span name + role.
+# Per-attempt sibling span name + role.
 _FR_SPAN_ROLE_KEY = "fortifyroot.span.role"
 _FR_LLM_ATTEMPT_SPAN_NAME_PREFIX = "fortifyroot.llamaindex"
 _FR_SPAN_ROLE_LLM_ATTEMPT = "llm_attempt"
 
-# ST-10 §4.5 parent marker.
+# Parent marker.
 _FR_HAS_ATTEMPT_CHILD_KEY = FR_HAS_ATTEMPT_CHILD_KEY
 
 # Dispatcher span IDs follow the pattern "ClassName.method-uuid".
@@ -217,7 +215,7 @@ def _content_to_string(content: Any) -> str:
 def _add_prompt_attrs(attrs: dict[str, Any], bound_args: Any) -> None:
     """Copy request prompt content onto the retry_attempt span.
 
-    Backend §4.5 makes retry_attempt the canonical LLMUsageEvent span
+    Backend dedup makes retry_attempt the canonical LLMUsageEvent span
     when it exists, so safety correlation still needs prompt content on
     this span. LlamaIndex safety wrappers have already processed the
     bound arguments by the time dispatcher span handlers see them.
@@ -326,7 +324,7 @@ def _start_retry_attempt(id_: str, instance: Any, bound_args: Any = None) -> Non
             "ended": False,
         }
 
-    # §4.5 marker timing: set on parent AFTER the first qualifying
+    # Parent-marker timing: set on parent AFTER the first qualifying
     # llm_attempt has successfully started under it.
     try:
         parent_span.set_attribute(_FR_HAS_ATTEMPT_CHILD_KEY, True)
@@ -407,8 +405,7 @@ class _FortifyRootRetryHandler(BaseSpanHandler):
     public LLM method invocation (chat/achat/complete/acomplete/...).
 
     De-dup vs the inner ``_chat``/``_complete`` spans is enforced by
-    a method-name whitelist in ``_is_outer_llm_method`` (F4 finding
-    from ST-10.0 C3 POC). So one HTTP attempt = exactly one
+    a method-name whitelist in ``_is_outer_llm_method``. So one HTTP attempt = exactly one
     retry_attempt span — even though LlamaIndex internally fires
     dispatcher spans on both the outer and inner methods.
 

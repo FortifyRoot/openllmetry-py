@@ -11,7 +11,7 @@
 # generator directly with fake chunks + stub histograms, so it needs NO OpenAI
 # API key and NO VCR cassette and is fully deterministic.
 #
-# Contract: fr-backend/docs/development/STREAMING_LATENCY_TTFT_STTG_PLAN.md
+# Contract: streaming latency contract
 import time
 
 from opentelemetry.sdk.trace import TracerProvider

@@ -51,8 +51,8 @@ logger = logging.getLogger(__name__)
 
 def _infer_llm_provider(model) -> str | None:
     model_name = str(model or "").lower()
-    # TODO(ST-6 follow-up): MVP support here is intentionally limited to the
-    # providers exercised in ST-6 (OpenAI + Anthropic). Expand this inference
+    # TODO: support here is intentionally limited to the currently
+    # certified providers (OpenAI + Anthropic). Expand this inference
     # when we certify more LlamaIndex-backed providers so safety-emitted
     # wrapper spans continue to carry provider/model attribution for them.
     if "claude" in model_name or "anthropic" in model_name:

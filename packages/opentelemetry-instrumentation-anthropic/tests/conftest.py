@@ -29,10 +29,10 @@ pytest_plugins = []
 
 
 class _NoFortifyRootSpanExporter(InMemorySpanExporter):
-    """ST-10.4 (2026-05-17): filter out any span whose name starts
+    """FortifyRoot retry-attempt (2026-05-17): filter out any span whose name starts
     with ``fortifyroot.`` from the upstream-test span exporter.
 
-    ST-10.4 added per-attempt ``fortifyroot.anthropic.attempt_1``
+    FortifyRoot retry-attempt added per-attempt ``fortifyroot.anthropic.attempt_1``
     sibling spans under every anthropic logical call (once the
     Anthropic ``_wrap`` started using ``trace.use_span`` so the retry
     handler can find the parent span). Upstream / legacy Anthropic
@@ -42,7 +42,7 @@ class _NoFortifyRootSpanExporter(InMemorySpanExporter):
     retry_attempt sibling is also exported.
 
     Mirrors the OpenAI test conftest pattern (added 2026-05-16) and
-    the LangChain CI-hardening pattern (2026-05-15). ST-10.4 unit
+    the LangChain CI-hardening pattern (2026-05-15). FortifyRoot retry-attempt unit
     tests in ``tests/test_retry_attempt_emission.py`` use their own
     ``fresh_tracer`` fixture (not this one), so they continue to see
     retry_attempt spans and aren't affected by the filter.

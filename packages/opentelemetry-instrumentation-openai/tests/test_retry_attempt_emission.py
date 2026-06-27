@@ -1,6 +1,6 @@
-"""Tests for ST-10.4 OpenAI direct-SDK retry-attempt emission.
+"""Tests for FortifyRoot retry-attempt OpenAI direct-SDK retry-attempt emission.
 
-Covers (per RETRY_LOOP.md §4.4 OpenAI row + §4.7 suppression):
+Covers (per retry-loop design notes §4.4 OpenAI row + §4.7 suppression):
   - Instrumentor symmetry: install/uninstall flips state cleanly and is
     idempotent.
   - Single-attempt happy path: ONE llm_attempt span under the active
@@ -520,7 +520,7 @@ def test_framework_registry_suppression_skips_emission(fresh_tracer):
 # ---------------------------------------------------------------------------
 
 def test_direct_sdk_wrapper_does_not_self_register_in_framework_registry(fresh_tracer):
-    """REGRESSION GUARD (review-driven fix 2026-05-13): direct-SDK
+    """REGRESSION GUARD: direct-SDK
     wrappers MUST NOT register tokens in the §4.7.1 framework registry.
     The registry's contract reserves registration for FRAMEWORK wrappers
     (LiteLLM / LangChain / LlamaIndex); direct-SDK wrappers only CONSULT
@@ -556,8 +556,8 @@ def test_direct_sdk_wrapper_does_not_self_register_in_framework_registry(fresh_t
 
 
 def test_two_concurrent_async_sends_each_emit_a_retry_attempt(fresh_tracer):
-    """REGRESSION GUARD (review-driven fix 2026-05-13): two asyncio
-    tasks sharing one OS thread MUST each emit their own retry_attempt
+    """REGRESSION GUARD: two asyncio tasks sharing one OS thread
+    MUST each emit their own retry_attempt
     span. Pre-fix, the first task's self-registered framework token
     would suppress the second task via the thread-keyed registry —
     silently dropping one of the spans."""
@@ -643,7 +643,7 @@ def test_llm_endpoints_emit_with_correct_operation(fresh_tracer, path, expected_
 
 
 # ---------------------------------------------------------------------------
-# §4.5-driven usage-extraction policy (review-driven fix 2026-05-13).
+# §4.5-driven usage-extraction policy.
 # ---------------------------------------------------------------------------
 
 def test_non_streaming_response_body_populates_usage_id_and_model(fresh_tracer):
@@ -680,19 +680,19 @@ def test_non_streaming_response_body_populates_usage_id_and_model(fresh_tracer):
 
 
 def test_streaming_request_skips_emission_entirely(fresh_tracer):
-    """ST-10.4 (review-driven 2026-05-17): when ``stream=True`` is
+    """FortifyRoot retry-attempt: when ``stream=True`` is
     passed to send, the wrap SKIPS retry_attempt emission entirely —
     no span is created, and ``response.json()`` is never called.
 
     Rationale: streaming retry_attempts cannot carry token usage at
     attempt-end (SSE stream consumption would break the SDK), but
     backend §4.5 dedup would promote them to canonical
-    LLMUsageEvents → zero-token events → fr-system-tests
+    LLMUsageEvents → zero-token events → system tests
     ``prompt_tokens > 0`` assertions fail. The parent
     ``openai.chat`` span (which gets full usage from ``ChatStream``'s
     stream-completion callback) stays canonical. Streaming
     retry-loop detection is the deferred follow-up
-    ``ST-10.4-FOLLOWUP-streaming-usage``.
+    ``streaming retry-usage follow-up``.
     """
     tracer, exporter, _ = fresh_tracer
     request = _make_request(model="gpt-4o-mini")
@@ -736,8 +736,8 @@ def test_streaming_request_skips_emission_entirely(fresh_tracer):
 
 
 def test_non_2xx_response_with_usage_in_body_populates_usage_tokens(fresh_tracer):
-    """REGRESSION GUARD (review-driven follow-up 2026-05-13): per
-    RETRY_LOOP.md §4.4 token-usage rule (around line 164), wrappers
+    """REGRESSION GUARD: per
+    retry-loop design notes §4.4 token-usage rule (around line 164), wrappers
     MUST extract usage from the response body whenever it's present,
     REGARDLESS of whether the attempt succeeded. Some failures (e.g.
     context-length-exceeded errors) consume tokens and the provider
@@ -840,7 +840,7 @@ def test_non_streaming_response_with_malformed_body_does_not_crash(fresh_tracer)
 # ---------------------------------------------------------------------------
 
 def test_external_suppression_with_no_override_skips_emission(fresh_tracer):
-    """REGRESSION GUARD (review-driven 2026-05-16, Issue 3B counter-proof):
+    """REGRESSION GUARD for nested context propagation:
     when SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY is set in the OTel
     context WITHOUT the OpenAI override key, the retry handler MUST
     suppress emission. This is the user-explicit "disable LLM
@@ -866,7 +866,7 @@ def test_external_suppression_with_no_override_skips_emission(fresh_tracer):
 
 
 def test_openai_wrapper_override_key_unblocks_emission_under_suppression(fresh_tracer):
-    """REGRESSION GUARD (review-driven 2026-05-16, Issue 3B):
+    """REGRESSION GUARD for nested context propagation:
     the openai chat_wrapper sets SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY
     around its wrapped SDK call (to protect against OTHER LLM
     instrumentors double-counting). To preserve retry_attempt emission
@@ -896,7 +896,7 @@ def test_openai_wrapper_override_key_unblocks_emission_under_suppression(fresh_t
 
 
 def test_tracer_provider_plumbed_through_instrument_retry_emitter():
-    """REGRESSION GUARD (review-driven 2026-05-16, Issue 3A):
+    """REGRESSION GUARD for context suppression:
     ``instrument_retry_emitter(tracer_provider=provider)`` MUST cause
     the wrapper to emit retry_attempt spans through that explicit
     provider, not the global default. Without this plumbing, a

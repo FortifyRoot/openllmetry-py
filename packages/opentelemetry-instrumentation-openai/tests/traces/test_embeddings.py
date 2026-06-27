@@ -7,7 +7,7 @@ from unittest.mock import patch
 import httpx
 import openai
 import pytest
-from openai import _base_client  # ST-10.4: spy target for retry-aware httpx wrap
+from openai import _base_client  # FortifyRoot retry-attempt: spy target for retry-aware httpx wrap
 from opentelemetry.sdk._logs import ReadableLogRecord
 from opentelemetry.semconv._incubating.attributes import (
     gen_ai_attributes as GenAIAttributes,

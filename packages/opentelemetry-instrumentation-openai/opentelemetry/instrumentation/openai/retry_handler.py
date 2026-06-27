@@ -1,7 +1,6 @@
-"""ST-10.4 retry-aware emission for the OpenAI direct SDK.
+"""Retry-aware emission for the OpenAI direct SDK.
 
-Per RETRY_LOOP.md §4.4 OpenAI row + §4.7 suppression discipline +
-ST-10.0 hook-table addendum (in phase_st10_retryloop.txt):
+Design contract:
 
   - Hook the SDK-internal private httpx wrapper classes
     ``openai._base_client.SyncHttpxClientWrapper.send`` and
@@ -24,9 +23,8 @@ ST-10.0 hook-table addendum (in phase_st10_retryloop.txt):
     (``/v1/chat/completions``, ``/v1/completions``, ``/v1/embeddings``,
     ``/v1/responses``, plus Azure ``/openai/deployments/.../chat/completions``).
     Non-LLM SDK traffic (e.g. ``/v1/models`` for token-refresh / model
-    listing) does NOT emit retry_attempt — per §4.4.1 allow-listing
-    requirement.
-  - Suppression discipline (§4.7): before emitting, check BOTH the
+    listing) does NOT emit retry_attempt.
+  - Suppression discipline: before emitting, check BOTH the
     OTel context ``SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY`` AND
     the shared ``is_framework_owned()`` registry. If either says
     "suppress", we skip emission. This is the key invariant that
@@ -34,8 +32,8 @@ ST-10.0 hook-table addendum (in phase_st10_retryloop.txt):
     DOUBLE-emitting when both framework wrappers and direct-SDK
     wrappers are active.
   - Parent resolution: use the current OTel ambient span. If invalid
-    or absent, gracefully skip (no orphan retry_attempt). The §4.5
-    backend dedup degrades gracefully.
+    or absent, gracefully skip (no orphan retry_attempt). Backend
+    dedup degrades gracefully.
   - Per-attempt span lifetime: open on wrap entry, end on wrap exit
     (success OR exception). On non-2xx HTTP, set
     ``http.status_code`` + ``error.type`` and ERROR status; on 2xx,
@@ -71,7 +69,7 @@ from wrapt import wrap_function_wrapper
 logger = logging.getLogger(__name__)
 
 
-# ST-10 §4.4 / §4.5 constants.
+# Retry-attempt constants.
 _FR_SPAN_ROLE_KEY = "fortifyroot.span.role"
 _FR_LLM_ATTEMPT_SPAN_NAME_PREFIX = "fortifyroot.openai"
 _FR_SPAN_ROLE_LLM_ATTEMPT = "llm_attempt"
@@ -227,7 +225,7 @@ def _server_attrs_from_request(request: Any) -> dict[str, Any]:
 
 
 def _is_suppressed() -> bool:
-    """§4.7: skip emission if EITHER suppression signal is active.
+    """Skip emission if EITHER suppression signal is active.
 
     Subtle: the OpenAI ``chat_wrapper`` (and ``achat_wrapper``) sets
     ``SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY`` around its own
@@ -270,7 +268,7 @@ def _resolve_parent_span() -> Optional["trace.Span"]:
 
 
 def _set_parent_marker(parent_span: "trace.Span") -> None:
-    """§4.5: mark the parent as 'has llm_attempt child' AFTER the
+    """Mark the parent as 'has llm_attempt child' AFTER the
     first child has successfully started. Idempotent — setting twice
     is a no-op."""
     try:
@@ -317,15 +315,15 @@ def _finalize_success(span: "trace.Span", response: Any, *, is_streaming: bool =
 
     For non-streaming responses (regardless of 2xx vs non-2xx), parse
     the JSON body and extract usage tokens + response id + response
-    model. Per RETRY_LOOP.md §4.4 token-usage rule (around line 164):
+    model. Per the retry-attempt token-usage rule:
     wrappers MUST extract usage from the response body whenever it's
     present, regardless of whether the attempt succeeded — some
     failures (context-length-exceeded errors etc.) DO consume tokens
-    and the provider returns usage in the error body. Backend §4.5
+    and the provider returns usage in the error body. Backend
     dedup makes a qualifying retry_attempt canonical (even single-
     attempt) and reads token attrs from it
-    (``fr-backend/internal/processing/proc_llm_extractor.go``
-    ``isRetryAttempt`` block) — so usage attribution must live here.
+    retry-attempt dedup reads token attrs from retry_attempt spans, so
+    usage attribution must live here.
 
     For streaming responses (``stream=True`` passed to ``send()``),
     body reading would consume the SSE stream before the SDK can
@@ -351,7 +349,7 @@ def _finalize_success(span: "trace.Span", response: Any, *, is_streaming: bool =
             pass
 
         # Non-streaming body parse — applies to BOTH 2xx and non-2xx per the
-        # §4.4 token-usage rule. ``_extract_usage_from_body`` is fully
+        # retry-attempt token-usage rule. ``_extract_usage_from_body`` is fully
         # defensive: missing fields, parse failure, and bodies without
         # ``usage`` all degrade silently to "no attrs set".
         if not is_streaming:
@@ -475,31 +473,31 @@ def _sync_send_wrapper(wrapped, instance, args, kwargs):
     request.
 
     Framework-attempt registry: this wrapper does NOT register a token.
-    The §4.7.1 registry's documented contract (see ``retry_registry.py``
+    The framework-attempt registry's documented contract (see ``retry_registry.py``
     docstring) reserves registration for FRAMEWORK wrappers (LiteLLM /
     LangChain / LlamaIndex). Direct-SDK wrappers only CONSULT via
     ``is_framework_owned()``. Self-registering would falsely suppress
     other concurrent direct-SDK calls on the same OS thread — a real
     issue under asyncio where two tasks share a thread.
 
-    Streaming skip (ST-10.4 review-driven 2026-05-17): when
+    Streaming skip: when
     ``stream=True`` is passed to send, this wrapper SKIPS retry_attempt
     emission entirely. Rationale: streaming retry_attempts cannot
     carry token usage (the body is the SSE stream and reading it would
-    break the SDK), but backend §4.5 dedup makes any qualifying
+    break the SDK), but backend dedup makes any qualifying
     retry_attempt the canonical LLMUsageEvent — producing a zero-token
     canonical event for streaming calls. By not emitting at all, the
     parent ``openai.chat`` span (which DOES get full usage attribution
     from ``ChatStream``'s stream-completion callback) remains the
     canonical event. Streaming retry-loop detection is the documented
-    deferred follow-up ``ST-10.4-FOLLOWUP-streaming-usage``; this
-    explicit skip is part of that deferral.
+    deferred streaming-usage follow-up; this explicit skip is part of
+    that deferral.
     """
     request = args[0] if args else kwargs.get("request")
     if request is None or not _should_emit_for(request):
         return wrapped(*args, **kwargs)
 
-    # ST-10.4: skip retry_attempt emission for streaming calls.
+    # Skip retry_attempt emission for streaming calls.
     if bool(kwargs.get("stream", False)):
         return wrapped(*args, **kwargs)
 
@@ -542,7 +540,7 @@ async def _async_send_wrapper(wrapped, instance, args, kwargs):
     if request is None or not _should_emit_for(request):
         return await wrapped(*args, **kwargs)
 
-    # ST-10.4: skip retry_attempt emission for streaming (see
+    # Skip retry_attempt emission for streaming (see
     # _sync_send_wrapper docstring for rationale).
     if bool(kwargs.get("stream", False)):
         return await wrapped(*args, **kwargs)
@@ -632,7 +630,7 @@ def instrument_retry_emitter(tracer_provider=None) -> None:
         )
         if not sync_ok:
             logger.warning(
-                "ST-10.4: openai._base_client.%s.%s missing/incompatible; "
+                "OpenAI retry emitter: openai._base_client.%s.%s missing/incompatible; "
                 "skipping sync retry_attempt emission. Normal openai "
                 "instrumentation is unaffected.",
                 _SYNC_WRAPPER_CLASS, _WRAPPED_METHOD,
@@ -646,13 +644,13 @@ def instrument_retry_emitter(tracer_provider=None) -> None:
                 )
             except Exception as e:
                 logger.warning(
-                    "ST-10.4: failed to wrap openai sync httpx send (%s); "
+                    "OpenAI retry emitter: failed to wrap openai sync httpx send (%s); "
                     "retry_attempt emission disabled for sync path",
                     e,
                 )
         if not async_ok:
             logger.warning(
-                "ST-10.4: openai._base_client.%s.%s missing/incompatible; "
+                "OpenAI retry emitter: openai._base_client.%s.%s missing/incompatible; "
                 "skipping async retry_attempt emission. Normal openai "
                 "instrumentation is unaffected.",
                 _ASYNC_WRAPPER_CLASS, _WRAPPED_METHOD,
@@ -666,7 +664,7 @@ def instrument_retry_emitter(tracer_provider=None) -> None:
                 )
             except Exception as e:
                 logger.warning(
-                    "ST-10.4: failed to wrap openai async httpx send (%s); "
+                    "OpenAI retry emitter: failed to wrap openai async httpx send (%s); "
                     "retry_attempt emission disabled for async path",
                     e,
                 )
@@ -687,7 +685,7 @@ def uninstrument_retry_emitter() -> None:
                 unwrap(f"{_OPENAI_BASE_CLIENT_MODULE}.{cls}", _WRAPPED_METHOD)
             except Exception:
                 logger.debug(
-                    "ST-10.4: openai unwrap of %s.%s failed (likely "
+                    "OpenAI retry emitter: unwrap of %s.%s failed (likely "
                     "wrap was never installed for this variant)",
                     cls, _WRAPPED_METHOD,
                     exc_info=True,

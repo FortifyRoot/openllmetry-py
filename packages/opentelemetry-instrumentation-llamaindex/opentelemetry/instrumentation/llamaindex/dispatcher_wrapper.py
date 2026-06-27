@@ -156,7 +156,7 @@ STREAMING_END_EVENTS = (
 def instrument_with_dispatcher(tracer: Tracer):
     instrument_llm_safety_wrappers()
     dispatcher = get_dispatcher()
-    # ST-10.3: register the FR retry-attempt handler FIRST, before
+    # Register the FR retry-attempt handler FIRST, before
     # OpenLLMetrySpanHandler. Order matters because span handlers
     # fire in registration order — and our handler reads the
     # ambient OTel context to decide the parent of the
@@ -383,7 +383,7 @@ class OpenLLMetrySpanHandler(BaseSpanHandler[SpanHolder]):
         # ``_stamp_llm_model_for_safety()`` to keep safety findings
         # emitted on this span (via emit_deferred_findings) correctly
         # attributed to model / provider. See
-        # fr-system-tests st_phase_6.txt addendum 8.
+        # framework safety attribution regression coverage.
         if is_openllmetry_class:
             span.set_attribute(_FR_LLM_WRAPPER_ROLE_KEY, _FR_LLM_WRAPPER_ROLE_VALUE)
         try:

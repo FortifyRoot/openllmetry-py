@@ -102,8 +102,8 @@ class LangchainInstrumentor(BaseInstrumentor):
         traceloopCallbackHandler = TraceloopCallbackHandler(
             tracer, duration_histogram, token_histogram
         )
-        # ST-10.2: register the FR retry-attempt handler alongside the
-        # existing Traceloop handler. Per ST-10.0 C2 POC findings, this
+        # Register the FR retry-attempt handler alongside the
+        # existing Traceloop handler. This
         # captures per-HTTP-attempt callbacks on framework-layer retry
         # paths (e.g. Runnable.with_retry) and emits one
         # fortifyroot.langchain.attempt_<N> sibling span per attempt
@@ -111,7 +111,7 @@ class LangchainInstrumentor(BaseInstrumentor):
         # handler as a CONSTRUCTION-time reference so it can resolve the
         # workflow parent via Traceloop's run_id-keyed ``spans`` dict
         # without mutating shared state per-callback-manager-init
-        # (review-round-2 Major 5).
+        # shared-state races.
         fortifyrootRetryHandler = _FortifyRootRetryHandler(
             traceloop_handler=traceloopCallbackHandler,
         )
@@ -253,10 +253,8 @@ class _BaseCallbackManagerInitWrapper:
         # the test-isolation bug observed when the FR retry handler
         # was registered FIRST: running before Traceloop caused
         # Traceloop's context-attach/detach discipline to break
-        # downstream (LiteLLM tests in the same pytest session
-        # observed stale OTel ambient context leaking from LangChain
-        # — review-batch-1 v6 trace-id-shared-across-tests bug,
-        # 2026-05-11).
+        # downstream tests from observing stale OTel ambient context
+        # leaking from LangChain.
         for handler in instance.inheritable_handlers:
             if isinstance(handler, type(self._callback_handler)):
                 break
@@ -266,14 +264,14 @@ class _BaseCallbackManagerInitWrapper:
             # we need a way to determine the type of CallbackManager being wrapped.
             self._callback_handler._callback_manager = instance
             instance.add_handler(self._callback_handler, True)
-        # ST-10.2: register the FR retry-attempt handler AFTER
+        # Register the FR retry-attempt handler AFTER
         # Traceloop. Idempotent registration. The handler already
         # holds a CONSTRUCTION-time reference to the Traceloop handler
         # (set in LangchainInstrumentor._instrument). We deliberately
         # do NOT mutate any shared attribute on the retry handler per
         # callback-manager-init — that previously raced when concurrent
         # Runnable invocations created BaseCallbackManagers on
-        # different threads (review-round-2 Major 5).
+        # different threads.
         if self._retry_handler is not None:
             for handler in instance.inheritable_handlers:
                 if isinstance(handler, type(self._retry_handler)):
@@ -319,13 +317,13 @@ class _OpenAITracingWrapper:
         # In legacy chains like LLMChain, suppressing model instrumentations
         # within create_llm_span doesn't work, so this should helps as a fallback.
         #
-        # ST-10 review-round-2 fix (2026-05-11): capture the attach token
+        # Capture the attach token
         # and detach in ``finally`` so this suppression layer doesn't leak
         # into the OTel context stack indefinitely. The pre-fix code
         # never detached, accumulating SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY
         # frames on every wrapped openai call, which compounded across
         # LangChain tests in long pytest sessions and risked corrupting
-        # later instrumentor behaviour. See review-round-2 Blocker 3.
+        # later instrumentor behaviour.
         suppression_token: Optional[Any] = None
         try:
             suppression_token = context_api.attach(

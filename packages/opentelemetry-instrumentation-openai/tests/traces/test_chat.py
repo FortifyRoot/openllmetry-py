@@ -7,7 +7,7 @@ import logging
 from unittest.mock import patch
 
 import httpx
-from openai import _base_client  # ST-10.4: spy target for retry-aware httpx wrap
+from openai import _base_client  # FortifyRoot retry-attempt: spy target for retry-aware httpx wrap
 import pytest
 from openai.resources.chat.completions import Completions
 from openai.types.chat.chat_completion_message_tool_call import (

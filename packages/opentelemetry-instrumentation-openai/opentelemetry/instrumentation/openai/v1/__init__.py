@@ -358,7 +358,7 @@ class OpenAIV1Instrumentor(BaseInstrumentor):
             realtime_connect_wrapper(tracer),
         )
 
-        # ST-10.4: per-attempt retry_attempt emission via private
+        # Per-attempt retry_attempt emission via private
         # ``openai._base_client`` httpx wrapper classes. Guarded against
         # missing private symbols (logs warning + skips emission). Pass
         # the same tracer_provider the rest of the instrumentor uses so
@@ -370,7 +370,7 @@ class OpenAIV1Instrumentor(BaseInstrumentor):
         instrument_retry_emitter(tracer_provider=tracer_provider)
 
     def _uninstrument(self, **kwargs):
-        uninstrument_retry_emitter()  # ST-10.4 symmetry
+        uninstrument_retry_emitter()  # retry-emitter symmetry
         unwrap_dotted_method("openai.resources.chat.completions", "Completions.create")
         unwrap_dotted_method("openai.resources.completions", "Completions.create")
         unwrap_dotted_method("openai.resources.embeddings", "Embeddings.create")
