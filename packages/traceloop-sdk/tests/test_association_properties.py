@@ -9,8 +9,8 @@ from opentelemetry.semconv_ai import SpanAttributes
 from traceloop.sdk import Traceloop
 from traceloop.sdk.decorators import task, workflow
 
-# ST-10.4 (review-driven 2026-05-16, renamed 2026-06-12): generalized
-# from name-based LangChain-only filter to role-based. Drops every
+# FortifyRoot retry-attempt filtering generalized from a name-based
+# LangChain-only filter to a role-based filter. Drops every
 # provider's FortifyRoot LLM-attempt sibling (openai / anthropic /
 # bedrock / langchain / llamaindex / litellm) uniformly.
 _FR_SPAN_ROLE_KEY = "fortifyroot.span.role"

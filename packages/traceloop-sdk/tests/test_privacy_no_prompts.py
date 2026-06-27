@@ -12,7 +12,7 @@ from opentelemetry.semconv._incubating.attributes import (
 from traceloop.sdk.decorators import workflow, task
 
 
-# ST-10.4: FortifyRoot LLM-attempt spans land in this test's
+# FortifyRoot retry-attempt: FortifyRoot LLM-attempt spans land in this test's
 # session-scoped exporter ahead of the logical ``openai.chat`` span.
 # Filter by the canonical ``fortifyroot.span.role`` attribute so every
 # provider is dropped uniformly.

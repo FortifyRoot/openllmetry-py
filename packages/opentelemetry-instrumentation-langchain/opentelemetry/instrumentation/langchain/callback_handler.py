@@ -195,7 +195,7 @@ class TraceloopCallbackHandler(BaseCallbackHandler):
                 if child_span.end_time is None:  # avoid warning on ended spans
                     child_span.end()
         span.end()
-        # ST-10 review-round-2 fix (2026-05-11): detach ALL attached
+        # Detach ALL attached
         # tokens in LIFO order (reverse of attach). Pre-fix, only the
         # single ``token`` field was detached — which for LLM spans
         # was the suppression token only, leaving the span-context
@@ -273,7 +273,7 @@ class TraceloopCallbackHandler(BaseCallbackHandler):
         entity_path: str = "",
         metadata: Optional[dict[str, Any]] = None,
     ) -> Span:
-        # ST-10 review-round-2 fix (2026-05-11): capture every
+        # Capture every
         # context_api.attach()'s return token and append to the
         # SpanHolder's ``tokens`` list. ``_end_span`` detaches them in
         # LIFO order. Pre-fix, the metadata-association attach below
@@ -284,7 +284,7 @@ class TraceloopCallbackHandler(BaseCallbackHandler):
         # span-context attach, leaving the ended span "current" in OTel
         # context past the end of the LangChain test, which polluted
         # later LiteLLM / LlamaIndex tests in the same pytest session
-        # (session-scoped sdk_helper). See review-round-2 Blocker 1.
+        # session.
         attached_tokens: list[Any] = []
         if metadata is not None:
             current_association_properties = (
@@ -404,7 +404,7 @@ class TraceloopCallbackHandler(BaseCallbackHandler):
         # we already have an LLM span by this point,
         # so skip any downstream instrumentation from here
         #
-        # ST-10 review-round-2 fix (2026-05-11): APPEND the suppression
+        # Append the suppression
         # token to the existing SpanHolder.tokens list rather than
         # replacing the SpanHolder. The pre-fix code created a new
         # SpanHolder with ONLY the suppression token, dropping the
@@ -513,7 +513,7 @@ class TraceloopCallbackHandler(BaseCallbackHandler):
 
         self._end_span(span, run_id)
         if parent_run_id is None:
-            # ST-10 review-round-2 note (2026-05-11): pre-existing leak —
+            # Pre-existing leak:
             # this attach is not paired with a detach. It writes
             # SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY=False to a new
             # context layer that grows the OTel context stack by one

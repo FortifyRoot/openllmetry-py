@@ -44,8 +44,8 @@ class _LegacyAssertionSpanExporter(InMemorySpanExporter):
 @pytest.fixture(scope="session", name="span_exporter")
 def fixture_span_exporter():
     # The upstream/non-FR LangChain tests assert the historical Traceloop
-    # spans exactly. ST-10 adds FR implementation spans; keep these legacy
-    # assertions focused while dedicated ST-10 retry tests use a raw exporter.
+    # spans exactly. retry-loop work adds FR implementation spans; keep these legacy
+    # assertions focused while dedicated retry-loop work retry tests use a raw exporter.
     exporter = _LegacyAssertionSpanExporter()
     yield exporter
 

@@ -17,7 +17,7 @@ from traceloop.sdk import Traceloop
 from traceloop.sdk.decorators import workflow, task
 
 
-# ST-10.4: filter FortifyRoot LLM-attempt sibling spans out of legacy
+# FortifyRoot retry-attempt: filter FortifyRoot LLM-attempt sibling spans out of legacy
 # exact-span-list / set assertions. Role-based filter so every provider
 # (openai, anthropic, bedrock, langchain, llamaindex, litellm) is
 # dropped uniformly. See retry-loop docs for context.

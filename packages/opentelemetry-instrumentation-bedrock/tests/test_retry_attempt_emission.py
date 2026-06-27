@@ -1,6 +1,6 @@
-"""Tests for ST-10.4 Bedrock direct-SDK retry-attempt emission.
+"""Tests for FortifyRoot retry-attempt Bedrock direct-SDK retry-attempt emission.
 
-Covers (per RETRY_LOOP.md §4.4 Bedrock row + §4.7 suppression):
+Covers (per retry-loop design notes §4.4 Bedrock row + §4.7 suppression):
   - install_event_hooks_on_client registers both event-name patterns
     on a bedrock-runtime client's botocore event system.
   - Single-attempt happy path: before-send → response-received pair
@@ -384,8 +384,8 @@ def test_framework_registry_suppression_skips_emission(fresh_tracer):
 
 
 def test_direct_sdk_wrapper_does_not_self_register_in_framework_registry(fresh_tracer):
-    """REGRESSION GUARD (review-driven fix 2026-05-13): the bedrock
-    retry hooks MUST NOT register tokens in the §4.7.1 framework
+    """REGRESSION GUARD: the Bedrock retry hooks MUST NOT register
+    tokens in the §4.7.1 framework
     registry. Direct-SDK wrappers only CONSULT via
     ``is_framework_owned()``."""
     tracer, _, _ = fresh_tracer
@@ -494,11 +494,11 @@ def test_before_send_with_request_missing_context_is_noop(fresh_tracer):
 
 
 # ---------------------------------------------------------------------------
-# M1: streaming-span ambient-context fix (review-driven 2026-05-13).
+# Streaming-span ambient-context fix.
 # ---------------------------------------------------------------------------
 
 def test_streaming_event_skips_emission_entirely(fresh_tracer):
-    """ST-10.4 (review-driven 2026-05-17): when the botocore operation
+    """FortifyRoot retry-attempt: when the botocore operation
     is a streaming one (event name ends with ``Stream``:
     ``InvokeModelWithResponseStream`` / ``ConverseStream``), the
     ``_before_send_hook`` SKIPS retry_attempt emission entirely.
@@ -508,11 +508,11 @@ def test_streaming_event_skips_emission_entirely(fresh_tracer):
     via the stream-completion callback in the Bedrock streaming
     wrapper, AFTER our hook has finalised) but §4.5 dedup would
     still promote them to canonical → zero-token LLMUsageEvents
-    breaking fr-system-tests. The parent
+    breaking system tests. The parent
     ``bedrock.completion`` / ``bedrock.converse`` span (which DOES
     get full usage via ``stream_done``) stays canonical. Streaming
     retry-loop detection is the deferred follow-up
-    ``ST-10.4-FOLLOWUP-streaming-usage``.
+    ``streaming retry-usage follow-up``.
 
     This test supersedes the earlier
     ``test_streaming_span_via_use_span_parents_retry_attempt`` from

@@ -557,7 +557,7 @@ def _wrap(
     kwargs = _apply_prompt_safety(span, kwargs, name)
     _handle_input(span, event_logger, kwargs)
     start_time = time.perf_counter()
-    # ST-10.4 (review-driven 2026-05-17): make the anthropic.chat span
+    # Make the anthropic.chat span
     # the AMBIENT OTel context for the duration of the SDK call so the
     # FortifyRoot retry handler (wrapping
     # ``anthropic._base_client.SyncHttpxClientWrapper.send``) can
@@ -698,7 +698,7 @@ async def _awrap(
     kwargs = await asyncio.to_thread(_apply_prompt_safety, span, kwargs, name)  # FR: async safety
     await _ahandle_input(span, event_logger, kwargs)
     start_time = time.perf_counter()
-    # ST-10.4 (review-driven 2026-05-17): see sync _wrap above for
+    # See sync _wrap above for
     # rationale on use_span(end_on_exit=False) around the wrapped call.
     try:
         with trace.use_span(span, end_on_exit=False):
@@ -898,16 +898,16 @@ class AnthropicInstrumentor(BaseInstrumentor):
             except Exception:
                 pass  # that's ok, we don't want to fail if some methods do not exist
 
-        # ST-10.4: per-attempt retry_attempt emission via private
+        # Per-attempt retry_attempt emission via private
         # ``anthropic._base_client`` httpx wrapper classes. Guarded
         # against missing private symbols (logs warning + skips emission).
         # Pass the same tracer_provider the rest of the instrumentor
         # uses so retry_attempt spans land in the same exporter as the
-        # anthropic logical span (review-driven 2026-05-16 fix).
+        # anthropic logical span.
         instrument_retry_emitter(tracer_provider=tracer_provider)
 
     def _uninstrument(self, **kwargs):
-        uninstrument_retry_emitter()  # ST-10.4 symmetry
+        uninstrument_retry_emitter()  # retry-emitter symmetry
         for wrapped_method in WRAPPED_METHODS:
             wrap_package = wrapped_method.get("package")
             wrap_object = wrapped_method.get("object")

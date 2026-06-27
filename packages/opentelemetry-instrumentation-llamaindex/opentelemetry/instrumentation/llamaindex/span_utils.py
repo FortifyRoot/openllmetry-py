@@ -18,8 +18,8 @@ from opentelemetry.semconv_ai import (
 
 def _infer_llm_provider(model) -> str | None:
     model_name = str(model or "").lower()
-    # TODO(ST-6 follow-up): MVP support here is intentionally limited to the
-    # providers exercised in ST-6 (OpenAI + Anthropic). Expand this inference
+    # TODO: support here is intentionally limited to the currently
+    # certified providers (OpenAI + Anthropic). Expand this inference
     # as additional LlamaIndex-backed providers are certified so delegated
     # wrapper spans and backend LLMUsage attribution keep working for them too.
     if "claude" in model_name or "anthropic" in model_name:
@@ -114,7 +114,7 @@ def set_llm_chat_response_model_attributes(event, span):
     output_tokens = None
     total_tokens = None
 
-    # TODO(ST-6 follow-up): token extraction below currently covers the usage
+    # TODO: token extraction below currently covers the usage
     # shapes we needed for the MVP providers/certified paths (OpenAI-style,
     # Anthropic-style, and Cohere metadata fallback). Extend this branch as
     # additional LlamaIndex-backed providers are added so token attribution

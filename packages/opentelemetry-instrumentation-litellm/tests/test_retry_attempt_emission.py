@@ -1,9 +1,9 @@
-"""Tests for ST-10.1 LiteLLM retry-aware emission.
+"""Tests for LiteLLM retry-aware attempt emission.
 
 Covers:
   - Instrumentor symmetry: _FortifyRootRetryEmitter is registered at
     instrument() AND removed at uninstrument() (Fallback B child-emission
-    proof requirement (ii) per RETRY_LOOP.md §4.4.1).
+    proof requirement (ii) per retry-loop design notes §4.4.1).
   - Single-attempt happy path: one llm_attempt span emitted under the
     safety_wrapper parent, parent carries has_attempt_child=true.
   - Multi-attempt retry path: 3 retry_attempt spans emitted (2 ERROR + 1
@@ -127,14 +127,14 @@ def _assert_attempt_sequence(spans):
 # ---------------------------------------------------------------------------
 
 def test_retry_emitter_inherits_from_litellm_custom_logger():
-    """REGRESSION GUARD (review-batch-1 end-to-end discovery 2026-05-10):
+    """Regression guard for LiteLLM callback dispatch compatibility.
     LiteLLM's dispatch loop gates every callback hook on
     ``isinstance(callback, CustomLogger)`` — see
     litellm_logging.py:1015 (log_pre_api_call) and :2303
     (log_success_event). A duck-typed _FortifyRootRetryEmitter is
     silently SKIPPED by the dispatch — log_pre_api_call never fires
     → no retry_attempt span ever emitted → §4.5 backend dedup has
-    nothing to dedup → the entire ST-10.1 contract is no-op'd.
+    nothing to dedup → the entire LiteLLM retry-attempt contract is no-op'd.
 
     The bug was invisible to fork-side unit tests (which call the
     emitter's hooks directly, bypassing LiteLLM's dispatch). End-to-end
@@ -340,7 +340,7 @@ def test_three_attempt_retry_path_emits_three_retry_attempt_spans(fresh_tracer):
     LiteLLM retry helpers re-enter completion() per attempt and therefore
     create one safety_wrapper per attempt; those multi-trace paths can
     correctly surface as separate attempt_1 spans, as documented in
-    RETRY_LOOP.md.
+    retry-loop design notes.
     """
     tracer, exporter, _ = fresh_tracer
 
@@ -547,15 +547,15 @@ def test_no_parent_span_does_not_emit_orphan_retry_attempt(fresh_tracer):
 
 
 def test_resolve_routed_provider_normalisation():
-    """REGRESSION GUARD (review-batch-1 Minor 4 fix 2026-05-10):
+    """Regression guard for routed-provider normalization.
     LiteLLM's ``custom_llm_provider`` taxonomy uses values like
     ``"bedrock"``, ``"bedrock_converse"``, ``"vertex_ai"`` that
-    diverge from RETRY_LOOP.md §4.2's canonical routed-provider
+    diverge from retry-loop design notes §4.2's canonical routed-provider
     form (``"AWS"``, ``"google"``, etc.). Cross-wrapper drift
     here would mean LiteLLM-routed-Bedrock spans carry
     ``gen_ai.system="bedrock"`` while LangChain/LlamaIndex
     Bedrock spans carry ``gen_ai.system="AWS"``, breaking the
-    ST-10.0 §4.2 cross-wrapper consistency contract.
+    retry-loop design §4.2 cross-wrapper consistency contract.
     """
     # AWS Bedrock — all variants must normalise to "AWS".
     assert _resolve_routed_provider({"custom_llm_provider": "bedrock"}) == "AWS"

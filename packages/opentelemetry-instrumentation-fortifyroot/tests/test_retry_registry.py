@@ -1,6 +1,6 @@
 """Tests for the §4.7.1 framework-attempt registry.
 
-Required tests per RETRY_LOOP.md §4.7.1:
+Required tests per retry-loop design notes §4.7.1:
   - re-entrancy (one thread can hold multiple tokens, suppression
     only stops when ALL are unregistered)
   - stale-entry eviction (TTL-based, runs in-band on read path)
@@ -111,7 +111,7 @@ def test_per_thread_isolation():
 def test_stale_entry_eviction_via_ttl(monkeypatch):
     """Tokens older than _REGISTRY_STALE_TTL_SEC are evicted on the
     next is_framework_owned() call. This is the load-bearing
-    in-band eviction (review-round-4 Q2 fix) — without it a leaked
+    in-band eviction path; without it a leaked
     token (framework crashed) would suppress emission forever."""
     # Shrink the TTL so the test runs in real time.
     monkeypatch.setattr(retry_registry, "_REGISTRY_STALE_TTL_SEC", 0.1)
@@ -226,7 +226,9 @@ def test_thread_id_reuse_does_not_leak_state():
 
 
 def test_unregister_works_from_different_thread_than_register():
-    """REGRESSION GUARD (review-batch-1 Blocker fix 2026-05-10): a
+    """Regression guard for cross-thread unregister behavior.
+
+    A
     framework's start callback and terminal callback can run on
     different OS threads (e.g. asyncio dispatching success/failure
     callbacks to a worker thread). The original implementation used

@@ -8,7 +8,7 @@ from openai import OpenAI
 from traceloop.sdk.decorators import workflow
 
 
-# ST-10.4: FortifyRoot LLM-attempt spans land in the exporter ahead of
+# FortifyRoot retry-attempt: FortifyRoot LLM-attempt spans land in the exporter ahead of
 # the logical ``openai.chat`` span; filter by role so the legacy
 # ``spans[0] == openai.chat`` assumption survives. The user's custom
 # span_postprocess_callback is intentionally still invoked on the

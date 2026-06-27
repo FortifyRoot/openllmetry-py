@@ -264,7 +264,7 @@ def test_logger_non_text_content_is_noop():
 # ---------------------------------------------------------------------------
 
 def test_instrumentor_registers_logger_at_position_zero():
-    """_FortifyRootCompletionLogger must be at index 0, and (post-ST-10.1)
+    """_FortifyRootCompletionLogger must be at index 0, and (post-LiteLLM retry-attempt)
     _FortifyRootRetryEmitter must be at index 1, with any pre-existing
     customer callbacks pushed to index 2+ after instrument()."""
     import litellm

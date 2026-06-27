@@ -1,6 +1,6 @@
-"""Tests for ST-10.4 Anthropic direct-SDK retry-attempt emission.
+"""Tests for FortifyRoot retry-attempt Anthropic direct-SDK retry-attempt emission.
 
-Covers (per RETRY_LOOP.md §4.4 Anthropic row + §4.7 suppression):
+Covers (per retry-loop design notes §4.4 Anthropic row + §4.7 suppression):
   - Instrumentor symmetry: install/uninstall flips state cleanly and is
     idempotent.
   - Single-attempt happy path: ONE llm_attempt span under the active
@@ -101,7 +101,7 @@ def _make_response(status_code: int = 200, request_id: str = "req-abc",
                    body: Optional[dict] = None) -> SimpleNamespace:
     """Fake ``httpx.Response``. Non-streaming retry_attempt path now
     parses the body for usage / response.id / response.model — see the
-    2026-05-13 review-driven C2 fix.
+    2026-05-13 retry-parent resolution fix.
     """
     if body is None:
         body = {
@@ -382,7 +382,7 @@ def test_framework_registry_suppression_skips_emission(fresh_tracer):
 
 
 def test_direct_sdk_wrapper_does_not_self_register_in_framework_registry(fresh_tracer):
-    """REGRESSION GUARD (review-driven fix 2026-05-13): direct-SDK
+    """REGRESSION GUARD: direct-SDK
     wrappers MUST NOT register tokens in the §4.7.1 framework registry.
     Self-registration causes false suppression of concurrent direct-SDK
     calls sharing the same thread (asyncio repro in
@@ -409,7 +409,7 @@ def test_direct_sdk_wrapper_does_not_self_register_in_framework_registry(fresh_t
 
 
 def test_two_concurrent_async_sends_each_emit_a_retry_attempt(fresh_tracer):
-    """REGRESSION GUARD (review-driven fix 2026-05-13): two asyncio
+    """REGRESSION GUARD: two asyncio
     tasks sharing one OS thread MUST each emit their own retry_attempt."""
     tracer, exporter, _ = fresh_tracer
 
@@ -477,12 +477,12 @@ def test_llm_endpoints_emit_with_correct_operation(fresh_tracer, path, expected_
 
 
 # ---------------------------------------------------------------------------
-# §4.5-driven usage-extraction policy (review-driven fix 2026-05-13).
+# §4.5-driven usage-extraction policy.
 # ---------------------------------------------------------------------------
 
 def test_non_streaming_response_body_populates_usage_id_and_model(fresh_tracer):
     """Backend dedup makes the retry_attempt span the canonical
-    LLMUsageEvent (see ``proc_llm_extractor.go``). Anthropic non-streaming
+    LLMUsageEvent (see ``backend LLM extractor``). Anthropic non-streaming
     responses MUST carry usage on the retry_attempt span."""
     tracer, exporter, _ = fresh_tracer
     request = _make_request(model="claude-haiku-4-5")
@@ -510,7 +510,7 @@ def test_non_streaming_response_body_populates_usage_id_and_model(fresh_tracer):
 
 
 def test_streaming_request_skips_emission_entirely(fresh_tracer):
-    """ST-10.4 (review-driven 2026-05-17): when ``stream=True`` is
+    """FortifyRoot retry-attempt: when ``stream=True`` is
     passed to send, the wrap SKIPS retry_attempt emission entirely.
     See the openai analog for full rationale. The parent
     ``anthropic.chat`` span stays the canonical LLMUsageEvent.
@@ -551,8 +551,8 @@ def test_streaming_request_skips_emission_entirely(fresh_tracer):
 
 
 def test_non_2xx_response_with_usage_in_body_populates_usage_tokens(fresh_tracer):
-    """REGRESSION GUARD (review-driven follow-up 2026-05-13): per
-    RETRY_LOOP.md §4.4 token-usage rule, wrappers MUST extract usage
+    """REGRESSION GUARD: per
+    retry-loop design notes §4.4 token-usage rule, wrappers MUST extract usage
     from the response body whenever present, regardless of success.
     Some failures consume tokens and the provider returns usage in
     the error body."""

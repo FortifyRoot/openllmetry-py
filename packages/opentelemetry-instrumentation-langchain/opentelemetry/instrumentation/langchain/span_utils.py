@@ -41,7 +41,7 @@ class SpanHolder:
     start_time: float = field(default_factory=time.perf_counter)
     request_model: Optional[str] = None
     streaming_first_token_time: Optional[float] = None
-    # ST-10 review-round-2 fix (2026-05-11): every context_api.attach()
+    # Every context_api.attach()
     # performed for this span — span-context, suppression, metadata
     # association_properties — appended here in attach order. ``_end_span``
     # detaches them in REVERSE order (LIFO) so OTel's context stack is

@@ -13,7 +13,7 @@ from traceloop.sdk.prompts import get_prompt
 from traceloop.sdk.prompts.client import PromptRegistryClient
 
 
-# ST-10.4: filter FortifyRoot LLM-attempt sibling spans out of legacy
+# FortifyRoot retry-attempt: filter FortifyRoot LLM-attempt sibling spans out of legacy
 # exact-span-list / ``spans[0]`` assertions. Role-based filter so every
 # provider is dropped uniformly. See retry-loop docs for context.
 _FR_SPAN_ROLE_KEY = "fortifyroot.span.role"

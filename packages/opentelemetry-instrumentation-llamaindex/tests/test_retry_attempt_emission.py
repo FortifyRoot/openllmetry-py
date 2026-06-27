@@ -1,4 +1,4 @@
-"""Tests for ST-10.3 LlamaIndex retry-aware emission.
+"""Tests for LlamaIndex retry-aware attempt emission.
 
 Covers:
   - F4 de-dup contract: outer chat() AND inner _chat() both fire
@@ -49,7 +49,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
 @pytest.fixture
 def fresh_tracer():
     """Fresh TracerProvider + in-memory exporter installed as global,
-    matching the ST-10.1 / ST-10.2 fixture pattern."""
+    matching the LiteLLM retry-attempt / LangChain retry-attempt fixture pattern."""
     exporter = InMemorySpanExporter()
     provider = TracerProvider()
     provider.add_span_processor(SimpleSpanProcessor(exporter))
@@ -170,7 +170,7 @@ class _FakeChatResponse:
 
 def test_outer_method_emits_inner_method_does_not(fresh_tracer):
     """LlamaIndex dispatcher fires spans on BOTH the public ``chat()``
-    AND the inner ``_chat()`` (F4 finding from POC). ST-10.3 hooks
+    AND the inner ``_chat()`` (F4 finding from POC). LlamaIndex retry-attempt hooks
     SpanHandler.new_span and filters via
     ``_is_outer_llm_method`` → only the outer method emits a
     retry_attempt span.

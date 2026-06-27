@@ -1,7 +1,6 @@
-"""ST-10.4 retry-aware emission for the Bedrock (botocore) direct SDK.
+"""Retry-aware emission for the Bedrock (botocore) direct SDK.
 
-Per RETRY_LOOP.md §4.4 Bedrock row + §4.7 suppression discipline +
-ST-10.0 hook-table addendum (in phase_st10_retryloop.txt):
+Design contract:
 
   - Use botocore's PUBLIC event-hook API on bedrock-runtime clients:
       * ``before-send.bedrock-runtime.*`` fires once per HTTP attempt
@@ -23,14 +22,13 @@ ST-10.0 hook-table addendum (in phase_st10_retryloop.txt):
     do NOT register a framework-attempt token here — the §4.7.1
     registry's documented contract reserves registration for FRAMEWORK
     wrappers (LiteLLM / LangChain / LlamaIndex). Direct-SDK wrappers
-    only CONSULT via ``is_framework_owned()``. (See the 2026-05-13
-    review-driven C1 fix; an earlier draft of this module incorrectly
-    registered a token.)
+    only CONSULT via ``is_framework_owned()``. An earlier draft of
+    this module incorrectly registered a token.
   - Endpoint allow-list: implicit via the event-name pattern
     ``bedrock-runtime.*``. Only bedrock-runtime operations (Invoke /
     Converse and their streaming variants) fire these events; non-LLM
     AWS service traffic (S3, STS, etc.) is unaffected.
-  - Suppression discipline (§4.7): before emitting, check BOTH the
+  - Suppression discipline: before emitting, check BOTH the
     OTel context ``SUPPRESS_LANGUAGE_MODEL_INSTRUMENTATION_KEY`` AND
     the shared ``is_framework_owned()`` registry (consult-only — see
     above).
@@ -69,7 +67,7 @@ from opentelemetry.trace import SpanKind, Status, StatusCode
 logger = logging.getLogger(__name__)
 
 
-# ST-10 §4.4 / §4.5 constants.
+# Retry-attempt constants.
 _FR_SPAN_ROLE_KEY = "fortifyroot.span.role"
 _FR_LLM_ATTEMPT_SPAN_NAME_PREFIX = "fortifyroot.bedrock"
 _FR_SPAN_ROLE_LLM_ATTEMPT = "llm_attempt"
@@ -93,7 +91,7 @@ _CTX_TOKEN_KEY = "_fr_retry_attempt_framework_token"
 # the parent span on their provider but the retry_attempt span sent
 # into a no-op tracer. Module-level (not per-client) because all
 # bedrock-runtime clients created under one instrumentor share the
-# same provider config. (review-driven 2026-05-16 fix.)
+# same provider config.
 _tracer_provider = None
 
 
@@ -309,14 +307,14 @@ def _before_send_hook(event_name: Optional[str] = None, request: Any = None, **_
     ``request.context`` for retrieval by the paired ``response-received``
     hook.
 
-    No self-registration in the §4.7.1 framework registry: the registry's
+    No self-registration in the framework-attempt registry: the registry's
     contract reserves registration for FRAMEWORK wrappers (LiteLLM /
     LangChain / LlamaIndex). Direct-SDK wrappers only CONSULT via
     ``is_framework_owned()``. Defensive cleanup of any prior context-stored
     span on this request still runs, but it no longer touches the
     framework registry.
 
-    Streaming skip (ST-10.4 review-driven 2026-05-17): when the
+    Streaming skip: when the
     botocore operation is a streaming one (event name ends with
     ``Stream``: ``InvokeModelWithResponseStream`` /
     ``ConverseStream``), this hook skips retry_attempt emission.
@@ -324,12 +322,11 @@ def _before_send_hook(event_name: Optional[str] = None, request: Any = None, **_
     cannot carry token usage at attempt-end (usage arrives via the
     stream-completion callback installed by the Bedrock streaming
     wrapper, AFTER our hook has already finalised the span), but
-    §4.5 dedup would still promote them to canonical → zero-token
+    backend dedup would still promote them to canonical → zero-token
     LLMUsageEvent. Leaving the parent ``bedrock.completion`` /
     ``bedrock.converse`` span (which DOES get full usage from
     ``stream_done``) as the canonical event. Streaming retry-loop
-    detection is the deferred follow-up
-    ``ST-10.4-FOLLOWUP-streaming-usage``.
+    detection is a deferred streaming-usage follow-up.
     """
     try:
         if request is None:
@@ -367,7 +364,7 @@ def _before_send_hook(event_name: Optional[str] = None, request: Any = None, **_
         _set_parent_marker(parent)
         ctx[_CTX_SPAN_KEY] = span
     except Exception:
-        logger.debug("ST-10.4: bedrock before-send hook failed", exc_info=True)
+        logger.debug("Bedrock retry emitter: before-send hook failed", exc_info=True)
 
 
 class _ResponseDictAdapter:
@@ -413,8 +410,7 @@ def _response_received_hook(
       * ``http_response`` + ``parsed`` (older botocore signature the
         fork-side unit tests drive directly).
       * ``response_dict`` + ``parsed_response`` (botocore 1.42.x — the
-        names the real event emitter actually uses; verified via
-        ST-10.6 fr-system-tests probe).
+        names the real event emitter actually uses).
 
     Per-attempt finalisation reads ``status_code`` and ``headers`` from
     whichever shape is present; the rest of the body just falls through
@@ -449,7 +445,7 @@ def _response_received_hook(
             except Exception:
                 pass
     except Exception:
-        logger.debug("ST-10.4: bedrock response-received hook failed", exc_info=True)
+        logger.debug("Bedrock retry emitter: response-received hook failed", exc_info=True)
 
 
 def install_event_hooks_on_client(client: Any, tracer_provider=None) -> None:
@@ -476,7 +472,7 @@ def install_event_hooks_on_client(client: Any, tracer_provider=None) -> None:
         events = getattr(events, "events", None) if events is not None else None
         if events is None:
             logger.debug(
-                "ST-10.4: bedrock client missing .meta.events; "
+                "Bedrock retry emitter: client missing .meta.events; "
                 "skipping retry_attempt event-hook registration"
             )
             return
@@ -492,7 +488,7 @@ def install_event_hooks_on_client(client: Any, tracer_provider=None) -> None:
         )
     except Exception:
         logger.warning(
-            "ST-10.4: failed to register bedrock retry_attempt event hooks; "
+            "Bedrock retry emitter: failed to register retry_attempt event hooks; "
             "retry_attempt emission disabled for this client",
             exc_info=True,
         )
@@ -529,7 +525,7 @@ def uninstall_event_hooks_on_client(client: Any) -> None:
         except Exception:
             pass
     except Exception:
-        logger.debug("ST-10.4: bedrock event-hook unregister failed", exc_info=True)
+        logger.debug("Bedrock retry emitter: event-hook unregister failed", exc_info=True)
 
 
 def _reset_tracer_provider_for_test() -> None:
