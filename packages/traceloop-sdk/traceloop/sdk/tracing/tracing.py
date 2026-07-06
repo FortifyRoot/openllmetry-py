@@ -3,6 +3,7 @@
 # Original source: https://github.com/traceloop/openllmetry
 
 import atexit
+import ipaddress
 import logging
 import os
 from urllib.parse import urlparse
@@ -44,6 +45,7 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
 
 
 TRACER_NAME = "fortifyroot.tracer"
+LOCAL_EXPORT_HOSTS = {"localhost"}
 EXCLUDED_URLS = """
     iam.cloud.ibm.com,
     dataplatform.cloud.ibm.com,
@@ -63,6 +65,57 @@ EXCLUDED_URLS = """
     googleapis.com,
     githubusercontent.com,
     openaipublic.blob.core.windows.net"""
+
+
+def _is_local_export_host(host: Optional[str]) -> bool:
+    if not host:
+        return False
+    normalized = host.strip().lower()
+    if normalized in LOCAL_EXPORT_HOSTS:
+        return True
+    try:
+        return ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        return False
+
+
+def _resolve_grpc_exporter_endpoint(api_endpoint: str) -> tuple[str, bool]:
+    trimmed_endpoint = api_endpoint.strip()
+    if "://" not in trimmed_endpoint:
+        return trimmed_endpoint, False
+
+    parsed = urlparse(trimmed_endpoint)
+    if parsed.username or parsed.password:
+        raise ValueError("OTLP exporter endpoints must not include username or password")
+    scheme = parsed.scheme.lower()
+    if scheme == "grpcs":
+        return parsed.netloc, False
+    if scheme == "grpc":
+        if not _is_local_export_host(parsed.hostname):
+            raise ValueError(
+                "grpc:// OTLP export is insecure and is allowed only for local "
+                "development endpoints; use grpcs:// or https:// for remote collectors"
+            )
+        return parsed.netloc, True
+
+    raise ValueError(
+        f"Unsupported OTLP exporter endpoint scheme {parsed.scheme!r}; "
+        "use https://, http://, grpcs://, grpc://localhost, or a bare secure gRPC host:port"
+    )
+
+
+def _validate_http_exporter_endpoint(api_endpoint: str) -> None:
+    parsed = urlparse(api_endpoint.strip())
+    if parsed.username or parsed.password:
+        raise ValueError("OTLP exporter endpoints must not include username or password")
+    if parsed.scheme.lower() != "http":
+        return
+    if _is_local_export_host(parsed.hostname):
+        return
+    raise ValueError(
+        "http:// OTLP export is insecure and is allowed only for local "
+        "development endpoints; use https:// for remote collectors"
+    )
 
 
 class TracerWrapper(object):
@@ -334,9 +387,9 @@ def init_spans_exporter(api_endpoint: str, headers: Dict[str, str]) -> SpanExpor
 
     Supported schemes:
         - http:// or https:// → HTTP exporter
-        - grpc:// → gRPC exporter (insecure)
+        - grpc://localhost → gRPC exporter (insecure, local development only)
         - grpcs:// → gRPC exporter (secure/TLS)
-        - No scheme → gRPC exporter (insecure, for backward compatibility)
+        - No scheme → gRPC exporter (secure/TLS)
 
     Args:
         api_endpoint: The endpoint URL (with or without scheme)
@@ -349,6 +402,7 @@ def init_spans_exporter(api_endpoint: str, headers: Dict[str, str]) -> SpanExpor
 
     match parsed.scheme.lower():
         case "http" | "https":
+            _validate_http_exporter_endpoint(api_endpoint)
             base_url = api_endpoint.strip().rstrip('/')
             if not base_url.endswith('/v1/traces'):
                 endpoint = f"{base_url}/v1/traces"
@@ -356,17 +410,19 @@ def init_spans_exporter(api_endpoint: str, headers: Dict[str, str]) -> SpanExpor
                 endpoint = base_url
             return HTTPExporter(endpoint=endpoint, headers=headers)
         case "grpc":
+            grpc_endpoint, insecure = _resolve_grpc_exporter_endpoint(api_endpoint)
             return GRPCExporter(
-                endpoint=parsed.netloc, headers=headers, insecure=True
+                endpoint=grpc_endpoint, headers=headers, insecure=insecure
             )
         case "grpcs":
+            grpc_endpoint, insecure = _resolve_grpc_exporter_endpoint(api_endpoint)
             return GRPCExporter(
-                endpoint=parsed.netloc, headers=headers, insecure=False
+                endpoint=grpc_endpoint, headers=headers, insecure=insecure
             )
         case _:
-            # No scheme → default to insecure gRPC for backward compatibility
+            grpc_endpoint, insecure = _resolve_grpc_exporter_endpoint(api_endpoint)
             return GRPCExporter(
-                endpoint=api_endpoint.strip(), headers=headers, insecure=True
+                endpoint=grpc_endpoint, headers=headers, insecure=insecure
             )
 
 

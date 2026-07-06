@@ -58,13 +58,25 @@ class TestInitSpansExporter:
             init_spans_exporter(endpoint, {})
             mock.assert_called_once_with(endpoint=expected_endpoint, headers={})
 
+    @pytest.mark.parametrize("endpoint,match", [
+        ("http://collector.example.com:4318", "http:// OTLP export is insecure"),
+        ("http://host.docker.internal:4318", "http:// OTLP export is insecure"),
+        ("https://user:secret@collector.example.com:4318", "must not include username or password"),
+    ])
+    def test_http_endpoint_security_rejections(self, endpoint, match):
+        from traceloop.sdk.tracing.tracing import init_spans_exporter
+
+        with pytest.raises(ValueError, match=match):
+            init_spans_exporter(endpoint, {})
+
     @pytest.mark.parametrize("endpoint,expected_endpoint,insecure", [
         ("grpc://localhost:4317", "localhost:4317", True),
-        ("GRPC://host:4317", "host:4317", True),
+        ("GRPC://127.0.0.1:4317", "127.0.0.1:4317", True),
+        ("grpc://[::1]:4317", "[::1]:4317", True),
         ("grpcs://localhost:4317", "localhost:4317", False),
         ("GRPCS://host:4317", "host:4317", False),
         ("  grpc://localhost:4317  ", "localhost:4317", True),  # whitespace stripped
-        ("localhost:4317", "localhost:4317", True),  # no scheme = insecure gRPC
+        ("localhost:4317", "localhost:4317", False),  # no scheme = secure gRPC
     ])
     def test_grpc_schemes(self, endpoint, expected_endpoint, insecure):
         from traceloop.sdk.tracing.tracing import init_spans_exporter
@@ -73,6 +85,61 @@ class TestInitSpansExporter:
         with patch.object(OTLPSpanExporter, "__init__", return_value=None) as mock:
             init_spans_exporter(endpoint, {})
             mock.assert_called_once_with(endpoint=expected_endpoint, headers={}, insecure=insecure)
+
+    @pytest.mark.parametrize("endpoint,match", [
+        ("grpc://collector.example.com:4317", "grpc:// OTLP export is insecure"),
+        ("grpc://host.docker.internal:4317", "grpc:// OTLP export is insecure"),
+        ("otlp://collector.example.com:4317", "Unsupported OTLP exporter endpoint scheme"),
+    ])
+    def test_insecure_remote_or_unknown_grpc_schemes_are_rejected(self, endpoint, match):
+        from traceloop.sdk.tracing.tracing import init_spans_exporter
+
+        with pytest.raises(ValueError, match=match):
+            init_spans_exporter(endpoint, {})
+
+
+class TestInitMetricsAndLoggingExporters:
+    """Security-sensitive exporter endpoint parsing shared by metrics and logs."""
+
+    def test_metrics_bare_grpc_endpoint_is_secure_by_default(self):
+        from traceloop.sdk.metrics.metrics import init_metrics_exporter
+        from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
+
+        with patch.object(OTLPMetricExporter, "__init__", return_value=None) as mock:
+            init_metrics_exporter("collector.example.com:4317", {})
+
+        mock.assert_called_once_with(
+            endpoint="collector.example.com:4317",
+            headers={},
+            insecure=False,
+        )
+
+    def test_logging_local_grpc_endpoint_can_be_insecure(self):
+        from traceloop.sdk.logging.logging import init_logging_exporter
+        from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
+
+        with patch.object(OTLPLogExporter, "__init__", return_value=None) as mock:
+            init_logging_exporter("grpc://localhost:4317", {})
+
+        mock.assert_called_once_with(
+            endpoint="localhost:4317",
+            headers={},
+            insecure=True,
+        )
+
+    @pytest.mark.parametrize("factory_path,endpoint", [
+        ("traceloop.sdk.metrics.metrics.init_metrics_exporter", "grpc://collector.example.com:4317"),
+        ("traceloop.sdk.logging.logging.init_logging_exporter", "otlp://collector.example.com:4317"),
+        ("traceloop.sdk.metrics.metrics.init_metrics_exporter", "http://collector.example.com:4318"),
+        ("traceloop.sdk.logging.logging.init_logging_exporter", "https://user:secret@collector.example.com:4318"),
+    ])
+    def test_metrics_and_logging_reject_unsafe_or_unknown_schemes(self, factory_path, endpoint):
+        module_path, _, function_name = factory_path.rpartition(".")
+        module = __import__(module_path, fromlist=[function_name])
+        factory = getattr(module, function_name)
+
+        with pytest.raises(ValueError):
+            factory(endpoint, {})
 
 
 @pytest.mark.vcr

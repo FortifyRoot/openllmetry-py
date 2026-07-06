@@ -51,8 +51,17 @@ def _endpoint_label(endpoint: Any) -> str:
     if not raw_endpoint:
         return "unknown endpoint"
     parsed = urlparse(raw_endpoint)
-    if parsed.netloc:
-        return parsed.netloc
+    if parsed.hostname:
+        host = parsed.hostname
+        if ":" in host and not host.startswith("["):
+            host = f"[{host}]"
+        try:
+            port = parsed.port
+        except ValueError:
+            return raw_endpoint
+        if port is not None:
+            return f"{host}:{port}"
+        return host
     return raw_endpoint
 
 

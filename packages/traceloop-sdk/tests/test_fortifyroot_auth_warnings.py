@@ -12,6 +12,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 
 from traceloop.sdk.exporters.auth_warnings import (
     _AuthWarningClientProxy,
+    _endpoint_label,
     reset_auth_warning_state_for_tests,
 )
 
@@ -133,8 +134,8 @@ def test_http_exporters_warn_on_auth_failure_once(factory, signal, status_code, 
 
 def test_http_exporter_dedupes_by_endpoint(caplog):
     reset_auth_warning_state_for_tests()
-    exporter_one = _make_traces_http_exporter("http://collector-one:4318")
-    exporter_two = _make_traces_http_exporter("http://collector-two:4318")
+    exporter_one = _make_traces_http_exporter("http://localhost:4318")
+    exporter_two = _make_traces_http_exporter("http://localhost:4319")
     assert hasattr(exporter_one, "_session")
     assert hasattr(exporter_two, "_session")
     exporter_one._session.post = _rejecting_post(401)
@@ -147,8 +148,23 @@ def test_http_exporter_dedupes_by_endpoint(caplog):
     auth_warnings = _auth_warnings(caplog)
     assert len(auth_warnings) == 2
     messages = [record.getMessage() for record in auth_warnings]
-    assert any("collector-one:4318" in message for message in messages)
-    assert any("collector-two:4318" in message for message in messages)
+    assert any("localhost:4318" in message for message in messages)
+    assert any("localhost:4319" in message for message in messages)
+
+
+def test_endpoint_label_strips_userinfo():
+    assert _endpoint_label("https://user:secret@collector.example.com:4318/v1/traces") == (
+        "collector.example.com:4318"
+    )
+
+
+def test_endpoint_label_formats_ipv6_host():
+    assert _endpoint_label("grpcs://[::1]:4317") == "[::1]:4317"
+
+
+def test_endpoint_label_handles_invalid_port():
+    endpoint = "https://collector.example.com:99999/v1/traces"
+    assert _endpoint_label(endpoint) == endpoint
 
 
 @pytest.mark.parametrize(
