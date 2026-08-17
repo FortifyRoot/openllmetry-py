@@ -86,6 +86,22 @@ class TestInitSpansExporter:
             init_spans_exporter(endpoint, {})
             mock.assert_called_once_with(endpoint=expected_endpoint, headers={}, insecure=insecure)
 
+    def test_grpc_metadata_keys_are_lowercase(self):
+        from traceloop.sdk.tracing.tracing import init_spans_exporter
+        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+
+        with patch.object(OTLPSpanExporter, "__init__", return_value=None) as mock:
+            init_spans_exporter(
+                "grpc://localhost:4317",
+                {"Authorization": "Bearer test", "X-Api-Key": "test"},
+            )
+
+        mock.assert_called_once_with(
+            endpoint="localhost:4317",
+            headers={"authorization": "Bearer test", "x-api-key": "test"},
+            insecure=True,
+        )
+
     @pytest.mark.parametrize("endpoint,match", [
         ("grpc://collector.example.com:4317", "grpc:// OTLP export is insecure"),
         ("grpc://host.docker.internal:4317", "grpc:// OTLP export is insecure"),
@@ -124,6 +140,24 @@ class TestInitMetricsAndLoggingExporters:
         mock.assert_called_once_with(
             endpoint="localhost:4317",
             headers={},
+            insecure=True,
+        )
+
+    @pytest.mark.parametrize("signal", ["metrics", "logging"])
+    def test_grpc_signal_metadata_keys_are_lowercase(self, signal):
+        if signal == "metrics":
+            from traceloop.sdk.metrics.metrics import init_metrics_exporter as factory
+            from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter as exporter
+        else:
+            from traceloop.sdk.logging.logging import init_logging_exporter as factory
+            from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter as exporter
+
+        with patch.object(exporter, "__init__", return_value=None) as mock:
+            factory("grpc://localhost:4317", {"Authorization": "Bearer test"})
+
+        mock.assert_called_once_with(
+            endpoint="localhost:4317",
+            headers={"authorization": "Bearer test"},
             insecure=True,
         )
 

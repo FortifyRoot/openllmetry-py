@@ -21,6 +21,7 @@ from traceloop.sdk.exporters.auth_warnings import (
     FortifyRootGRPCMetricExporter as GRPCExporter,
     FortifyRootHTTPMetricExporter as HTTPExporter,
 )
+from traceloop.sdk.exporters.headers import grpc_metadata_headers
 
 LOCAL_EXPORT_HOSTS = {"localhost"}
 
@@ -125,7 +126,11 @@ def init_metrics_exporter(endpoint: str, headers: Dict[str, str]) -> MetricExpor
             base_url = f"{base_url}/v1/metrics"
         return HTTPExporter(endpoint=base_url, headers=headers)
     grpc_endpoint, insecure = _resolve_grpc_exporter_endpoint(trimmed_endpoint)
-    return GRPCExporter(endpoint=grpc_endpoint, headers=headers, insecure=insecure)
+    return GRPCExporter(
+        endpoint=grpc_endpoint,
+        headers=grpc_metadata_headers(headers),
+        insecure=insecure,
+    )
 
 
 def init_metrics_provider(
