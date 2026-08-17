@@ -34,6 +34,7 @@ from traceloop.sdk.exporters.auth_warnings import (
     FortifyRootGRPCSpanExporter as GRPCExporter,
     FortifyRootHTTPSpanExporter as HTTPExporter,
 )
+from traceloop.sdk.exporters.headers import grpc_metadata_headers
 from traceloop.sdk.tracing.content_allow_list import ContentAllowList
 from traceloop.sdk.utils import is_notebook
 from traceloop.sdk.utils.package_check import is_package_installed
@@ -412,17 +413,23 @@ def init_spans_exporter(api_endpoint: str, headers: Dict[str, str]) -> SpanExpor
         case "grpc":
             grpc_endpoint, insecure = _resolve_grpc_exporter_endpoint(api_endpoint)
             return GRPCExporter(
-                endpoint=grpc_endpoint, headers=headers, insecure=insecure
+                endpoint=grpc_endpoint,
+                headers=grpc_metadata_headers(headers),
+                insecure=insecure,
             )
         case "grpcs":
             grpc_endpoint, insecure = _resolve_grpc_exporter_endpoint(api_endpoint)
             return GRPCExporter(
-                endpoint=grpc_endpoint, headers=headers, insecure=insecure
+                endpoint=grpc_endpoint,
+                headers=grpc_metadata_headers(headers),
+                insecure=insecure,
             )
         case _:
             grpc_endpoint, insecure = _resolve_grpc_exporter_endpoint(api_endpoint)
             return GRPCExporter(
-                endpoint=grpc_endpoint, headers=headers, insecure=insecure
+                endpoint=grpc_endpoint,
+                headers=grpc_metadata_headers(headers),
+                insecure=insecure,
             )
 
 
